@@ -108,3 +108,19 @@ venv.bak/
 
 *.full.py
 *.shelve
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+backend/app/database/crawler.db
+*.db
+*.sqlite3
