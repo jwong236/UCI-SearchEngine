@@ -1,11 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import engine
-from app.models import crawler
-from app.api.crawler import router as crawler_router
+from backend.app.database import engine, init_db
+from backend.app.models import crawler
+from backend.app.api.crawler import router as crawler_router
+import logging
+import sys
 
-# Create database tables
-crawler.Base.metadata.create_all(bind=engine)
+# Configure logging to output to console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
+# Initialize database
+init_db()
 
 app = FastAPI(title="UCI Search Engine Crawler")
 
