@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Secret key for crawler control (in production, use environment variables)
-CRAWLER_SECRET_KEY = "your-secret-key-here"
+CRAWLER_SECRET_KEY = "jacob-secret-key"
 
 # Global crawler state
 crawler_running = False
