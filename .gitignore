@@ -122,5 +122,8 @@ env/
 
 # Database
 backend/app/database/crawler.db
+backend/app/database/crawler.db-journal
 *.db
+*.db-journal
 *.sqlite3
+*.sqlite3-journal
