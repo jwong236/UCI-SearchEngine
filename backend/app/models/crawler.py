@@ -1,5 +1,14 @@
 from typing import List
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Float,
+    LargeBinary,
+)
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 from ..database import Base
@@ -16,8 +25,15 @@ class URL(Base):
     last_crawled: Mapped[datetime | None] = mapped_column()
     discovered_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     word_count: Mapped[int | None] = mapped_column()
+
+    # Search-relevant content
     title: Mapped[str | None] = mapped_column()
-    content: Mapped[str | None] = mapped_column()
+    text_content: Mapped[str | None] = mapped_column()  # Clean text without HTML
+    document_vector: Mapped[bytes | None] = mapped_column(LargeBinary)  # TF-IDF vector
+    meta_description: Mapped[str | None] = mapped_column()  # For search snippets
+    important_headings: Mapped[str | None] = (
+        mapped_column()
+    )  # JSON string of important headings
 
     # Relationships
     outgoing_links: Mapped[List["URLRelationship"]] = relationship(
