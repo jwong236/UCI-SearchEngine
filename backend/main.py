@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.database import engine, init_db
 from backend.app.models import crawler
 from backend.app.api.crawler import router as crawler_router
+from backend.app.api.search import router as search_router
 import logging
 import sys
 
@@ -16,7 +17,7 @@ logging.basicConfig(
 # Initialize database
 init_db()
 
-app = FastAPI(title="UCI Search Engine Crawler")
+app = FastAPI(title="UCI Search Engine")
 
 # Configure CORS
 app.add_middleware(
@@ -29,8 +30,9 @@ app.add_middleware(
 
 # Include crawler routes
 app.include_router(crawler_router, prefix="/api/crawler", tags=["crawler"])
+app.include_router(search_router, prefix="/api/search", tags=["search"])
 
 
 @app.get("/")
 async def root():
-    return {"message": "UCI Search Engine Crawler API"}
+    return {"message": "UCI Search Engine API"}
