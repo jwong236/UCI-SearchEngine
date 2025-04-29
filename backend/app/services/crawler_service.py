@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
 import logging
+import json
+import numpy as np
 from ..models.crawler import URL, URLRelationship, DomainRateLimit, CrawlStatistics
+from .tokenizer_service import tokenize, get_token_frequencies
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -23,6 +26,9 @@ class CrawlerService:
             verify=False,  # Disable SSL verification
             headers={"User-Agent": "UCI Search Engine Crawler - Educational Project"},
         )
+        # Initialize vocabulary and document frequency tracking
+        self.vocabulary = set()
+        self.document_frequency = {}
 
     async def close(self):
         """Close the HTTP client."""
@@ -56,6 +62,62 @@ class CrawlerService:
             normalized += f"?{parsed.query}"
         return normalized.rstrip("/")
 
+    def _extract_text_content(self, soup: BeautifulSoup) -> str:
+        """Extract clean text content from HTML."""
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+
+        # Get text and clean it
+        text = soup.get_text()
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = " ".join(chunk for chunk in chunks if chunk)
+        return text
+
+    def _extract_meta_description(self, soup: BeautifulSoup) -> str:
+        """Extract meta description from HTML."""
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        if meta_desc and meta_desc.get("content"):
+            return meta_desc["content"]
+        return ""
+
+    def _extract_headings(self, soup: BeautifulSoup) -> str:
+        """Extract important headings from HTML."""
+        headings = []
+        for tag in ["h1", "h2", "h3"]:
+            for heading in soup.find_all(tag):
+                if heading.get_text().strip():
+                    headings.append({"level": tag, "text": heading.get_text().strip()})
+        return json.dumps(headings)
+
+    def _calculate_document_vector(self, text: str) -> bytes:
+        """Calculate and store TF-IDF vector for the document."""
+        # Tokenize and get frequencies
+        tokens = tokenize(text)
+        term_frequencies = get_token_frequencies(tokens)
+
+        # Update vocabulary and document frequency
+        self.vocabulary.update(term_frequencies.keys())
+        for term in term_frequencies:
+            self.document_frequency[term] = self.document_frequency.get(term, 0) + 1
+
+        # Calculate TF-IDF vector
+        total_docs = self.db.query(URL).count() + 1  # +1 for current document
+        vector = []
+        for term in sorted(self.vocabulary):
+            tf = term_frequencies.get(term, 0) / len(tokens) if tokens else 0
+            idf = np.log(total_docs / (self.document_frequency.get(term, 0) + 1))
+            vector.append(tf * idf)
+
+        # Normalize vector
+        vector = np.array(vector)
+        norm = np.linalg.norm(vector)
+        if norm > 0:
+            vector = vector / norm
+
+        return vector.tobytes()
+
     async def process_url(self, url: str) -> None:
         """Process a single URL: fetch, parse, and store its content."""
         logger.info(f"Starting to process URL: {url}")
@@ -70,7 +132,14 @@ class CrawlerService:
             logger.info(f"Fetching URL: {url}")
             response = await self.client.get(url)
             soup = BeautifulSoup(response.text, "html.parser")
+
+            # Extract all required content
             title = soup.title.string if soup.title else ""
+            text_content = self._extract_text_content(soup)
+            meta_description = self._extract_meta_description(soup)
+            important_headings = self._extract_headings(soup)
+            document_vector = self._calculate_document_vector(text_content)
+            word_count = len(tokenize(text_content))
 
             if not existing_url:
                 url_record = URL(
@@ -80,7 +149,11 @@ class CrawlerService:
                     last_crawled=datetime.now(timezone.utc),
                     is_completed=True,
                     title=title,
-                    content=response.text,
+                    text_content=text_content,
+                    document_vector=document_vector,
+                    meta_description=meta_description,
+                    important_headings=important_headings,
+                    word_count=word_count,
                 )
                 self.db.add(url_record)
                 logger.info(f"Added new URL record: {url}")
@@ -91,7 +164,11 @@ class CrawlerService:
                 url_record.last_crawled = datetime.now(timezone.utc)
                 url_record.is_completed = True
                 url_record.title = title
-                url_record.content = response.text
+                url_record.text_content = text_content
+                url_record.document_vector = document_vector
+                url_record.meta_description = meta_description
+                url_record.important_headings = important_headings
+                url_record.word_count = word_count
                 logger.info(f"Updated existing URL record: {url}")
 
             if response.status_code == 200:
@@ -108,10 +185,9 @@ class CrawlerService:
             if existing_url:
                 existing_url.status_code = 500
                 existing_url.last_crawled = datetime.now(timezone.utc)
-                existing_url.is_completed = True  # Mark as completed even if it failed
+                existing_url.is_completed = True
                 self.db.commit()
             else:
-                # Create a new URL record for failed URLs
                 url_record = URL(
                     url=url,
                     domain=urlparse(url).netloc,
@@ -122,7 +198,7 @@ class CrawlerService:
                 self.db.add(url_record)
                 self.db.commit()
 
-            self.mark_url_complete(url)  # Mark as completed in memory too
+            self.mark_url_complete(url)
 
     async def _check_rate_limit(self, url: str) -> None:
         """Implement rate limiting per domain."""
