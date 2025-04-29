@@ -8,6 +8,9 @@ from typing import List, Optional, Set
 import logging
 import json
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+from threading import Lock
 from ..models.crawler import URL, URLRelationship, DomainRateLimit, CrawlStatistics
 from .tokenizer_service import tokenize, get_token_frequencies
 
@@ -16,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class CrawlerService:
-    def __init__(self, db: Session):
+    def __init__(
+        self, db: Session, num_crawler_threads: int = 4, num_vector_threads: int = 2
+    ):
         self.db = db
         self.to_be_downloaded: List[str] = []
         self.completed: Set[str] = set()
@@ -30,9 +35,20 @@ class CrawlerService:
         self.vocabulary = set()
         self.document_frequency = {}
 
+        # Threading setup
+        self.num_crawler_threads = num_crawler_threads
+        self.num_vector_threads = num_vector_threads
+        self.crawler_pool = ThreadPoolExecutor(max_workers=num_crawler_threads)
+        self.vector_pool = ThreadPoolExecutor(max_workers=num_vector_threads)
+        self.url_queue = Queue()
+        self.vector_queue = Queue()
+        self.db_lock = Lock()
+
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
+        self.crawler_pool.shutdown()
+        self.vector_pool.shutdown()
 
     def add_url(self, url: str) -> None:
         """Add a URL to the frontier if it hasn't been crawled."""
@@ -98,9 +114,10 @@ class CrawlerService:
         term_frequencies = get_token_frequencies(tokens)
 
         # Update vocabulary and document frequency
-        self.vocabulary.update(term_frequencies.keys())
-        for term in term_frequencies:
-            self.document_frequency[term] = self.document_frequency.get(term, 0) + 1
+        with self.db_lock:
+            self.vocabulary.update(term_frequencies.keys())
+            for term in term_frequencies:
+                self.document_frequency[term] = self.document_frequency.get(term, 0) + 1
 
         # Calculate TF-IDF vector
         total_docs = self.db.query(URL).count() + 1  # +1 for current document
@@ -118,15 +135,24 @@ class CrawlerService:
 
         return vector.tobytes()
 
+    def _process_vector(self, url: str, text_content: str):
+        document_vector = self._calculate_document_vector(text_content)
+        with self.db_lock:
+            url_record = self.db.query(URL).filter(URL.url == url).first()
+            if url_record:
+                url_record.document_vector = document_vector
+                self.db.commit()
+
     async def process_url(self, url: str) -> None:
         """Process a single URL: fetch, parse, and store its content."""
         logger.info(f"Starting to process URL: {url}")
         existing_url = None
         try:
-            existing_url = self.db.query(URL).filter(URL.url == url).first()
-            if existing_url and existing_url.is_completed:
-                logger.info(f"URL already processed: {url}")
-                return
+            with self.db_lock:
+                existing_url = self.db.query(URL).filter(URL.url == url).first()
+                if existing_url and existing_url.is_completed:
+                    logger.info(f"URL already processed: {url}")
+                    return
 
             await self._check_rate_limit(url)
             logger.info(f"Fetching URL: {url}")
@@ -138,65 +164,67 @@ class CrawlerService:
             text_content = self._extract_text_content(soup)
             meta_description = self._extract_meta_description(soup)
             important_headings = self._extract_headings(soup)
-            document_vector = self._calculate_document_vector(text_content)
             word_count = len(tokenize(text_content))
 
-            if not existing_url:
-                url_record = URL(
-                    url=url,
-                    domain=urlparse(url).netloc,
-                    status_code=response.status_code,
-                    last_crawled=datetime.now(timezone.utc),
-                    is_completed=True,
-                    title=title,
-                    text_content=text_content,
-                    document_vector=document_vector,
-                    meta_description=meta_description,
-                    important_headings=important_headings,
-                    word_count=word_count,
-                )
-                self.db.add(url_record)
-                logger.info(f"Added new URL record: {url}")
-            else:
-                url_record = existing_url
-                url_record.domain = urlparse(url).netloc
-                url_record.status_code = response.status_code
-                url_record.last_crawled = datetime.now(timezone.utc)
-                url_record.is_completed = True
-                url_record.title = title
-                url_record.text_content = text_content
-                url_record.document_vector = document_vector
-                url_record.meta_description = meta_description
-                url_record.important_headings = important_headings
-                url_record.word_count = word_count
-                logger.info(f"Updated existing URL record: {url}")
+            with self.db_lock:
+                if not existing_url:
+                    url_record = URL(
+                        url=url,
+                        domain=urlparse(url).netloc,
+                        status_code=response.status_code,
+                        last_crawled=datetime.now(timezone.utc),
+                        is_completed=True,
+                        title=title,
+                        text_content=text_content,
+                        meta_description=meta_description,
+                        important_headings=important_headings,
+                        word_count=word_count,
+                    )
+                    self.db.add(url_record)
+                    logger.info(f"Added new URL record: {url}")
+                else:
+                    url_record = existing_url
+                    url_record.domain = urlparse(url).netloc
+                    url_record.status_code = response.status_code
+                    url_record.last_crawled = datetime.now(timezone.utc)
+                    url_record.is_completed = True
+                    url_record.title = title
+                    url_record.text_content = text_content
+                    url_record.meta_description = meta_description
+                    url_record.important_headings = important_headings
+                    url_record.word_count = word_count
+                    logger.info(f"Updated existing URL record: {url}")
 
-            if response.status_code == 200:
-                await self._process_links(url_record, soup)
+                if response.status_code == 200:
+                    await self._process_links(url_record, soup)
 
-            self._update_statistics(url_record)
-            self.db.commit()
+                self._update_statistics(url_record)
+                self.db.commit()
+
+            # Queue vector processing
+            self.vector_queue.put((url, text_content))
             self.mark_url_complete(url)
             logger.info(f"Successfully processed URL: {url}")
 
         except Exception as e:
             logger.error(f"Error processing URL {url}: {str(e)}")
-            self.db.rollback()
-            if existing_url:
-                existing_url.status_code = 500
-                existing_url.last_crawled = datetime.now(timezone.utc)
-                existing_url.is_completed = True
-                self.db.commit()
-            else:
-                url_record = URL(
-                    url=url,
-                    domain=urlparse(url).netloc,
-                    status_code=500,
-                    last_crawled=datetime.now(timezone.utc),
-                    is_completed=True,
-                )
-                self.db.add(url_record)
-                self.db.commit()
+            with self.db_lock:
+                self.db.rollback()
+                if existing_url:
+                    existing_url.status_code = 500
+                    existing_url.last_crawled = datetime.now(timezone.utc)
+                    existing_url.is_completed = True
+                    self.db.commit()
+                else:
+                    url_record = URL(
+                        url=url,
+                        domain=urlparse(url).netloc,
+                        status_code=500,
+                        last_crawled=datetime.now(timezone.utc),
+                        is_completed=True,
+                    )
+                    self.db.add(url_record)
+                    self.db.commit()
 
             self.mark_url_complete(url)
 
@@ -306,3 +334,16 @@ class CrawlerService:
         logger.info(
             f"Updated statistics: {stats.urls_crawled} crawled, {stats.urls_failed} failed, {stats.unique_domains} domains"
         )
+
+    def start_processing(self):
+        # Start vector processing threads
+        for _ in range(self.num_vector_threads):
+            self.vector_pool.submit(self._vector_worker)
+
+    def _vector_worker(self):
+        while True:
+            try:
+                url, text_content = self.vector_queue.get()
+                self._process_vector(url, text_content)
+            except Exception as e:
+                logger.error(f"Error in vector worker: {str(e)}")

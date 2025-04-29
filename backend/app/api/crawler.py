@@ -110,12 +110,11 @@ async def broadcast_log(message: str):
 
 async def run_crawler():
     """Main crawler loop."""
-    # Create a new database session for this background task
     db = SessionLocal()
     try:
-        crawler = CrawlerService(db)
+        crawler = CrawlerService(db, num_crawler_threads=4, num_vector_threads=2)
+        crawler.start_processing()
 
-        # Start with seed URLs
         seed_urls = [
             "https://www.ics.uci.edu",
             "https://www.cs.uci.edu",
@@ -126,21 +125,18 @@ async def run_crawler():
         for url in seed_urls:
             if not crawler_running:
                 break
-
             await broadcast_log(f"Processing seed URL: {url}")
             await crawler.process_url(url)
 
-        # Process discovered URLs
         while crawler_running:
             url_record = db.query(URL).filter(URL.is_completed == False).first()
-
             if not url_record:
                 await broadcast_log("No more URLs to process")
                 break
-
             await broadcast_log(f"Processing URL: {url_record.url}")
             await crawler.process_url(url_record.url)
 
         await broadcast_log("Crawler stopped")
     finally:
+        await crawler.close()
         db.close()
