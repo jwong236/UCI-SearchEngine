@@ -1,3 +1,4 @@
-from .crawler import router as crawler_router
+from .crawler import CrawlerService
+from .search import SearchService
 
-__all__ = ["crawler_router"]
+__all__ = ["CrawlerService", "SearchService"]
