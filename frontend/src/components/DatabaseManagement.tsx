@@ -9,7 +9,7 @@ import {
   FormControl,
   InputLabel
 } from '@mui/material';
-import { Upload as UploadIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Upload as UploadIcon, Delete as DeleteIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { useCrawlerForm } from '../hooks/useCrawlerForm';
 
 interface DatabaseInfo {
@@ -37,7 +37,7 @@ const DatabaseManagement: React.FC = () => {
     }
   };
 
-  const handleSwitchDatabase = async () => {
+  const handleChangeDatabase = async () => {
     if (!selectedDb || !secretKey) return;
     
     try {
@@ -74,6 +74,32 @@ const DatabaseManagement: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to delete database:', error);
+    }
+  };
+
+  const handleDownloadDatabase = async () => {
+    if (!selectedDb || !secretKey) return;
+    
+    try {
+      const response = await fetch('/api/crawler/download-db', {
+        headers: {
+          'X-Secret-Key': secretKey
+        }
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${selectedDb}.sqlite`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+    } catch (error) {
+      console.error('Failed to download database:', error);
     }
   };
 
@@ -129,20 +155,19 @@ const DatabaseManagement: React.FC = () => {
         <Stack direction="row" spacing={2}>
           <Button 
             variant="contained"
-            onClick={handleSwitchDatabase}
+            onClick={handleChangeDatabase}
             disabled={!selectedDb || selectedDb === databases.current || !secretKey}
           >
-            Confirm
+            Change
           </Button>
           
           <Button 
             variant="outlined"
-            color="error"
-            onClick={handleDeleteDatabase}
-            disabled={!selectedDb || selectedDb === databases.current || !secretKey}
-            startIcon={<DeleteIcon />}
+            startIcon={<DownloadIcon />}
+            onClick={handleDownloadDatabase}
+            disabled={!selectedDb || !secretKey}
           >
-            Delete Database
+            Download
           </Button>
           
           <Button 
@@ -151,7 +176,7 @@ const DatabaseManagement: React.FC = () => {
             startIcon={<UploadIcon />}
             disabled={!secretKey}
           >
-            Upload Database
+            Upload
             <input
               type="file"
               hidden
@@ -161,6 +186,16 @@ const DatabaseManagement: React.FC = () => {
                 if (file) handleUploadDatabase(file);
               }}
             />
+          </Button>
+          
+          <Button 
+            variant="outlined"
+            color="error"
+            onClick={handleDeleteDatabase}
+            disabled={!selectedDb || selectedDb === databases.current || !secretKey}
+            startIcon={<DeleteIcon />}
+          >
+            Delete
           </Button>
         </Stack>
       </Stack>

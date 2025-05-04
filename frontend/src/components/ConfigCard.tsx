@@ -25,7 +25,7 @@ export function ConfigCard({ seedUrls, secretKey, onSecretKeyChange, onSeedUrlsC
 
   return (
     <Paper elevation={2} sx={{ flex: 1, p: 3, minWidth: 220 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main', mr: 1 }}>
           Config
         </Typography>
