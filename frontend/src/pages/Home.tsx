@@ -123,15 +123,15 @@ export function Home() {
         />
         <StatusCard status={status} isRunning={isRunning} />
         <InfoCard 
-          stats={stats} 
+          stats={stats || null} 
           crawlMode={crawlMode} 
-          onRefresh={fetchStats} 
+          onRefresh={fetchStats}
           status={status} 
         />
       </Stack>
 
-      <ControlPanel showSettings={showSettings} setShowSettings={setShowSettings} />
-      <DatabaseManagement />
+      <ControlPanel showSettings={showSettings} setShowSettings={setShowSettings} secretKey={secretKey} />
+      <DatabaseManagement secretKey={secretKey} />
       <RealTimeLogsCard logs={logs} onClear={clearLogs} />
 
       {/* Settings Dialog */}

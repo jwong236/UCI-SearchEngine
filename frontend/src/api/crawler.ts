@@ -3,31 +3,52 @@ import axios from 'axios';
 const API_BASE_URL = 'http://localhost:8000/api';
 
 export interface CrawlerStatus {
-  is_running: boolean;
+  status: 'running' | 'stopped';
   statistics: {
     urls_crawled: number;
     urls_failed: number;
+    urls_in_queue: number;
+  };
+}
+
+export interface DetailedStatistics {
+  crawler_statistics: {
+    status: 'running' | 'stopped';
+    urls_crawled: number;
+    urls_failed: number;
     unique_domains: number;
+    urls_in_queue: number;
+  };
+  database_statistics: {
+    total_documents: number;
+    total_terms: number;
+    total_index_entries: number;
   };
 }
 
 export const crawlerApi = {
-  start: async (secretKey: string) => {
+  start: async (secretKey: string, mode: 'fresh' | 'continue' | 'recrawl') => {
     const response = await axios.post(`${API_BASE_URL}/crawler/start`, null, {
-      params: { secret_key: secretKey }
+      headers: { 'X-Secret-Key': secretKey },
+      params: { mode }
     });
     return response.data;
   },
 
   stop: async (secretKey: string) => {
     const response = await axios.post(`${API_BASE_URL}/crawler/stop`, null, {
-      params: { secret_key: secretKey }
+      headers: { 'X-Secret-Key': secretKey }
     });
     return response.data;
   },
 
   getStatus: async (): Promise<CrawlerStatus> => {
     const response = await axios.get(`${API_BASE_URL}/crawler/status`);
+    return response.data;
+  },
+
+  getDetailedStatistics: async (): Promise<DetailedStatistics> => {
+    const response = await axios.get(`${API_BASE_URL}/crawler/statistics`);
     return response.data;
   },
 

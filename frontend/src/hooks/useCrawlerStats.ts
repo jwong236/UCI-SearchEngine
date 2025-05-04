@@ -1,26 +1,18 @@
 import { useState, useEffect } from 'react';
-import { crawlerApi } from '../api/crawler';
+import { DetailedStatistics } from '../api/crawler';
+import { useCrawlerForm } from './useCrawlerForm';
 
 export function useCrawlerStats() {
-  const [stats, setStats] = useState<any>(null);
+  const { stats } = useCrawlerForm();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const data = await crawlerApi.getStatus();
-        setStats(data.statistics);
-      } catch (error) {
-        console.error('Failed to fetch statistics:', error);
-      }
-    };
+    if (stats) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [stats]);
 
-    fetchStats();
-    const interval = setInterval(fetchStats, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  return {
-    stats
-  };
+  return { stats, loading, error };
 } 

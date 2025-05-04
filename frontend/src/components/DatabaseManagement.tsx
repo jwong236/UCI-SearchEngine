@@ -11,27 +11,32 @@ import {
 } from '@mui/material';
 import { Upload as UploadIcon, Delete as DeleteIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { useCrawlerForm } from '../hooks/useCrawlerForm';
+import axios from 'axios';
+
+const API_BASE_URL = 'http://localhost:8000/api';
 
 interface DatabaseInfo {
   current: string;
   available: string[];
 }
 
-const DatabaseManagement: React.FC = () => {
+interface DatabaseManagementProps {
+  secretKey: string;
+}
+
+const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) => {
   const [databases, setDatabases] = useState<DatabaseInfo>({ current: '', available: [] });
   const [selectedDb, setSelectedDb] = useState<string>('');
-  const { secretKey } = useCrawlerForm();
 
   useEffect(() => {
     fetchDatabases();
-  }, []);
+  }, [secretKey]);
 
   const fetchDatabases = async () => {
     try {
-      const response = await fetch('/api/databases');
-      const data = await response.json();
-      setDatabases(data);
-      setSelectedDb(data.current);
+      const response = await axios.get(`${API_BASE_URL}/databases`);
+      setDatabases(response.data);
+      setSelectedDb(response.data.current);
     } catch (error) {
       console.error('Failed to fetch databases:', error);
     }

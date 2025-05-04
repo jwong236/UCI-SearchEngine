@@ -48,6 +48,7 @@ export function ConfigCard({ seedUrls, secretKey, onSecretKeyChange, onSeedUrlsC
           onChange={(e) => onSecretKeyChange(e.target.value)}
           fullWidth
           size="small"
+          type="password"
         />
         
         <Button 

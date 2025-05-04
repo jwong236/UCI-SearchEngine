@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { crawlerApi } from '../api/crawler';
+import React, { useState, useEffect } from 'react';
+import { crawlerApi, CrawlerStatus } from '../api/crawler';
 
 const SEED_URLS = [
   'https://www.ics.uci.edu',
@@ -8,32 +8,32 @@ const SEED_URLS = [
   'https://www.stat.uci.edu',
 ];
 
+export type CrawlMode = 'fresh' | 'continue' | 'recrawl';
+
 export function useCrawlerForm() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'running' | 'stopped' | 'error'>('idle');
   const [message, setMessage] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [stats, setStats] = useState<any>(null);
+  const [crawlerData, setCrawlerData] = useState<CrawlerStatus | null>(null);
   const [failedUrls, setFailedUrls] = useState<any[] | null>(null);
   const [failedLoading, setFailedLoading] = useState(false);
   const [secretKey, setSecretKey] = useState('');
+  const [crawlMode, setCrawlMode] = useState<CrawlMode>('continue');
 
-  // Manual fetch for status/statistics
-  const fetchStats = async () => {
-    try {
-      const data = await crawlerApi.getStatus();
-      setIsRunning(data.is_running);
-      setStats(data.statistics);
-      setStatus(data.is_running ? 'running' : 'stopped');
-    } catch (error) {
-      setStatus('error');
-      setMessage('Failed to fetch crawler status.');
-    }
-  };
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const data = await crawlerApi.getStatus();
+        setCrawlerData(data);
+        setStatus(data.status === 'running' ? 'running' : 'stopped');
+      } catch (error) {
+        setStatus('error');
+        setMessage('Failed to fetch crawler status.');
+      }
+    };
 
-  // Fetch once on mount
-  React.useEffect(() => {
     fetchStats();
-    // eslint-disable-next-line
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleStart = async () => {
@@ -45,11 +45,9 @@ export function useCrawlerForm() {
     setStatus('loading');
     setMessage('');
     try {
-      await crawlerApi.start(secretKey);
+      await crawlerApi.start(secretKey, crawlMode);
       setStatus('running');
       setMessage('Crawler started successfully!');
-      setIsRunning(true);
-      fetchStats();
     } catch (error) {
       setStatus('error');
       setMessage('Failed to start crawler.');
@@ -68,8 +66,6 @@ export function useCrawlerForm() {
       await crawlerApi.stop(secretKey);
       setStatus('stopped');
       setMessage('Crawler stopped successfully!');
-      setIsRunning(false);
-      fetchStats();
     } catch (error) {
       setStatus('error');
       setMessage('Failed to stop crawler.');
@@ -93,16 +89,27 @@ export function useCrawlerForm() {
     SEED_URLS,
     status,
     message,
-    isRunning,
-    stats,
+    isRunning: crawlerData?.status === 'running',
+    stats: crawlerData?.statistics,
     failedUrls,
     failedLoading,
     handleStart,
     handleStop,
     handleShowFailedUrls,
     setFailedUrls,
-    fetchStats,
+    fetchStats: async () => {
+      try {
+        const data = await crawlerApi.getStatus();
+        setCrawlerData(data);
+        setStatus(data.status === 'running' ? 'running' : 'stopped');
+      } catch (error) {
+        setStatus('error');
+        setMessage('Failed to fetch crawler status.');
+      }
+    },
     secretKey,
     setSecretKey,
+    crawlMode,
+    setCrawlMode,
   };
 } 

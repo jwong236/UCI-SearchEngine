@@ -15,9 +15,10 @@ import { useCrawlerForm } from '../hooks/useCrawlerForm';
 interface ControlPanelProps {
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
+  secretKey: string;
 }
 
-export function ControlPanel({ showSettings, setShowSettings }: ControlPanelProps) {
+export function ControlPanel({ showSettings, setShowSettings, secretKey }: ControlPanelProps) {
   const {
     status,
     message,
@@ -27,7 +28,6 @@ export function ControlPanel({ showSettings, setShowSettings }: ControlPanelProp
     showFailed,
     setShowFailed,
     failedLoading,
-    secretKey,
     setFailedUrls
   } = useCrawlerForm();
 
