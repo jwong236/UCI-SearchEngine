@@ -1,5 +1,6 @@
-import { Paper, Typography, Stack, Box, Tooltip, TextField, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { Paper, Typography, Stack, Box, Tooltip, TextField, Button, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useState } from 'react';
 
 interface ConfigCardProps {
@@ -21,6 +22,14 @@ export function ConfigCard({ seedUrls, secretKey, onSecretKeyChange, onSeedUrlsC
   const handleCancel = () => {
     setEditingUrls(seedUrls);
     setShowEditDialog(false);
+  };
+
+  const handleDeleteUrl = (index: number) => {
+    if (editingUrls.length > 1) {
+      const newUrls = [...editingUrls];
+      newUrls.splice(index, 1);
+      setEditingUrls(newUrls);
+    }
   };
 
   return (
@@ -62,30 +71,51 @@ export function ConfigCard({ seedUrls, secretKey, onSecretKeyChange, onSeedUrlsC
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 2 }}>
             {editingUrls.map((url, idx) => (
-              <TextField
-                key={idx}
-                label={`Seed URL ${idx + 1}`}
-                variant="outlined"
-                value={url}
-                onChange={(e) => {
-                  const newUrls = [...editingUrls];
-                  newUrls[idx] = e.target.value;
-                  setEditingUrls(newUrls);
-                }}
-                fullWidth
-              />
+              <Box key={idx} sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  label={`Seed URL ${idx + 1}`}
+                  variant="outlined"
+                  value={url}
+                  onChange={(e) => {
+                    const newUrls = [...editingUrls];
+                    newUrls[idx] = e.target.value;
+                    setEditingUrls(newUrls);
+                  }}
+                  fullWidth
+                />
+                <IconButton 
+                  onClick={() => handleDeleteUrl(idx)}
+                  disabled={editingUrls.length <= 1}
+                  color="error"
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </Box>
             ))}
-            <Button 
-              variant="outlined" 
-              onClick={() => setEditingUrls([...editingUrls, ''])}
-            >
-              Add URL
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button 
+                variant="outlined" 
+                onClick={() => setEditingUrls([...editingUrls, ''])}
+                fullWidth
+                sx={{ 
+                  height: '56px',
+                  backgroundColor: 'white',
+                  '&:hover': {
+                    backgroundColor: 'white',
+                    borderColor: 'primary.main',
+                    borderWidth: '2px'
+                  }
+                }}
+              >
+                Add URL
+              </Button>
+              <Box sx={{ width: '40px' }} /> {/* Spacer to match the delete button width */}
+            </Box>
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained">Save</Button>
+          <Button onClick={handleSave} variant="contained" sx={{ minWidth: '120px' }}>Save</Button>
         </DialogActions>
       </Dialog>
     </Paper>
