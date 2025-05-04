@@ -120,10 +120,17 @@ env/
 *.swp
 *.swo
 
-# Database
-backend/app/database/crawler.db
-backend/app/database/crawler.db-journal
-*.db
-*.db-journal
-*.sqlite3
-*.sqlite3-journal
+# Database files
+backend/app/database/data/db-*.sqlite
+backend/app/database/data/*.sqlite
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
