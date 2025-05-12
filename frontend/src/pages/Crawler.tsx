@@ -1,11 +1,8 @@
 import { 
   Typography, 
   Box, 
-  Paper,
   Stack,
   CircularProgress,
-  IconButton,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -23,9 +20,6 @@ import {
   TableHead,
   TableRow
 } from '@mui/material';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import DeleteIcon from '@mui/icons-material/Delete';
 import { useCrawlerForm, CrawlMode } from '../hooks/useCrawlerForm';
 import { useEffect, useState } from 'react';
 import { ControlPanel } from '../components/ControlPanel';
@@ -56,20 +50,17 @@ function useCrawlerLogs() {
   return { logs, clearLogs };
 }
 
-export function Home() {
+export function Crawler() {
   const {
     SEED_URLS,
     status,
-    message,
     isRunning,
     stats,
     failedUrls,
     failedLoading,
-    handleStart,
-    handleStop,
     handleShowFailedUrls,
     setFailedUrls,
-    fetchStats,
+    refreshStats,
     secretKey,
     setSecretKey,
     crawlMode,
@@ -117,15 +108,13 @@ export function Home() {
           secretKey={secretKey}
           onSecretKeyChange={setSecretKey}
           onSeedUrlsChange={(urls) => {
-            // TODO: Implement seed URL update in the backend
             console.log('New seed URLs:', urls);
           }}
         />
-        <StatusCard status={status} isRunning={isRunning} />
+        <StatusCard status={status} isRunning={isRunning} onRefresh={refreshStats} />
         <InfoCard 
           stats={stats || null} 
           crawlMode={crawlMode} 
-          onRefresh={fetchStats}
           status={status} 
         />
       </Stack>
@@ -168,15 +157,19 @@ export function Home() {
       </Dialog>
 
       {/* Failed URLs Dialog */}
-      <Dialog
-        open={showFailed}
+      <Dialog 
+        open={showFailed} 
         onClose={() => setShowFailed(false)}
         maxWidth="md"
         fullWidth
       >
         <DialogTitle>Failed URLs</DialogTitle>
         <DialogContent>
-          {failedUrls && failedUrls.length > 0 ? (
+          {failedLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : failedUrls && failedUrls.length > 0 ? (
             <TableContainer>
               <Table>
                 <TableHead>
@@ -186,8 +179,8 @@ export function Home() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {failedUrls.map((url, index) => (
-                    <TableRow key={index}>
+                  {failedUrls.map((url, idx) => (
+                    <TableRow key={idx}>
                       <TableCell>{url.url}</TableCell>
                       <TableCell>{url.error}</TableCell>
                     </TableRow>

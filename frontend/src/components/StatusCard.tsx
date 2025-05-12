@@ -1,14 +1,27 @@
-import { Paper, Typography, CircularProgress } from '@mui/material';
+import { Paper, Typography, CircularProgress, Box, IconButton, Tooltip } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 interface StatusCardProps {
   status: string;
   isRunning: boolean;
+  onRefresh: () => void;
 }
 
-export function StatusCard({ status, isRunning }: StatusCardProps) {
+export function StatusCard({ status, isRunning, onRefresh }: StatusCardProps) {
   return (
     <Paper elevation={2} sx={{ flex: 1, p: 3, minWidth: 180, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main', mb: 1 }}>Status</Typography>
+      <Box sx={{ position: 'relative', width: '100%', mb: 1 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main', textAlign: 'center' }}>Status</Typography>
+        <Box sx={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)' }}>
+          <Tooltip title="Refresh status">
+            <span>
+              <IconButton onClick={onRefresh} size="small" color="primary" disabled={status === 'loading'}>
+                <RefreshIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Box>
+      </Box>
       <Typography
         variant="h3"
         sx={{

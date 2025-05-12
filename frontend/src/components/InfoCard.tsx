@@ -1,5 +1,4 @@
-import { Paper, Typography, Stack, Box, IconButton, Tooltip } from '@mui/material';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import { Paper, Typography, Stack, Box } from '@mui/material';
 
 interface InfoCardProps {
   stats: {
@@ -8,22 +7,14 @@ interface InfoCardProps {
     urls_in_queue: number;
   } | null;
   crawlMode: string;
-  onRefresh: () => void;
   status: string;
 }
 
-export function InfoCard({ stats, crawlMode, onRefresh, status }: InfoCardProps) {
+export function InfoCard({ stats, crawlMode, status }: InfoCardProps) {
   return (
     <Paper elevation={2} sx={{ flex: 1, p: 3, minWidth: 220, position: 'relative' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
         <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main', flexGrow: 1 }}>Info</Typography>
-        <Tooltip title="Refresh statistics">
-          <span>
-            <IconButton onClick={onRefresh} size="small" color="primary" disabled={status === 'loading'}>
-              <RefreshIcon />
-            </IconButton>
-          </span>
-        </Tooltip>
       </Box>
       {stats ? (
         <Stack spacing={0.5}>
