@@ -336,3 +336,32 @@ async def set_seed_urls(urls: List[str], secret_key: str = None):
 
     set_seed_urls(urls)
     return {"message": "Seed URLs updated"}
+
+
+@router.get("/crawler/failed-urls")
+async def get_failed_urls():
+    """Get list of URLs that failed during crawling"""
+    crawler = get_current_crawler()
+    if not crawler:
+        return {"failed_urls": []}
+
+    async with get_db() as db:
+        failed_docs = await db.execute(
+            select(Document)
+            .where(Document.crawl_failed == True)
+            .order_by(Document.last_crawled_at.desc())
+        )
+        failed_docs = failed_docs.scalars().all()
+
+        return {
+            "failed_urls": [
+                {
+                    "url": doc.url,
+                    "error": doc.error_message,
+                    "failed_at": (
+                        doc.last_crawled_at.isoformat() if doc.last_crawled_at else None
+                    ),
+                }
+                for doc in failed_docs
+            ]
+        }

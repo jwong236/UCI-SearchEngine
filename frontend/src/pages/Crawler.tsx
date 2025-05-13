@@ -21,7 +21,7 @@ import {
   TableRow
 } from '@mui/material';
 import { useCrawlerForm, CrawlMode } from '../hooks/useCrawlerForm';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { ControlPanel } from '../components/ControlPanel';
 import DatabaseManagement from '../components/DatabaseManagement';
 import { ConfigCard } from '../components/ConfigCard';
@@ -57,10 +57,13 @@ export function Crawler() {
     currentSeedUrls,
     setCurrentSeedUrls,
     status,
+    message,
     isRunning,
     stats,
     failedUrls,
     failedLoading,
+    handleStart,
+    handleStop,
     handleShowFailedUrls,
     setFailedUrls,
     refreshStats,
@@ -72,6 +75,14 @@ export function Crawler() {
   const [showFailed, setShowFailed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
+  const handleRefresh = useCallback(async () => {
+    await refreshStats();
+  }, [refreshStats]);
+
+  const handleClearMessage = useCallback(() => {
+    setFailedUrls(null);
+  }, [setFailedUrls]);
+
   useEffect(() => {
     if (showFailed && !failedUrls) {
       handleShowFailedUrls();
@@ -79,7 +90,7 @@ export function Crawler() {
     if (!showFailed) {
       setFailedUrls(null);
     }
-  }, [showFailed]);
+  }, [showFailed, failedUrls, handleShowFailedUrls, setFailedUrls]);
 
   return (
     <Box 
@@ -111,7 +122,7 @@ export function Crawler() {
           onSecretKeyChange={setSecretKey}
           onSeedUrlsChange={setCurrentSeedUrls}
         />
-        <StatusCard status={status} isRunning={isRunning} onRefresh={refreshStats} />
+        <StatusCard status={status} isRunning={isRunning} onRefresh={handleRefresh} />
         <InfoCard 
           stats={stats || null} 
           crawlMode={crawlMode} 
@@ -119,7 +130,19 @@ export function Crawler() {
         />
       </Stack>
 
-      <ControlPanel showSettings={showSettings} setShowSettings={setShowSettings} secretKey={secretKey} />
+      <ControlPanel 
+        showSettings={showSettings} 
+        setShowSettings={setShowSettings} 
+        secretKey={secretKey}
+        status={status}
+        isRunning={isRunning}
+        message={message}
+        onStart={handleStart}
+        onStop={handleStop}
+        onShowFailedUrls={handleShowFailedUrls}
+        onClearMessage={handleClearMessage}
+        failedLoading={failedLoading}
+      />
       <DatabaseManagement secretKey={secretKey} />
       <RealTimeLogsCard logs={logs} onClear={clearLogs} />
 

@@ -6,7 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import router
-from .config.globals import logger, get_available_databases, set_available_databases
+from .config.globals import (
+    logger,
+    get_available_databases,
+    set_available_databases,
+    set_current_db,
+)
 from .database.connection import (
     get_db_path,
     init_db,
@@ -53,6 +58,8 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(f"Using existing database at {default_db_path}")
         await setup_connections(settings.DEFAULT_DB_NAME)
+
+    set_current_db(settings.DEFAULT_DB_NAME)
 
     available_dbs = get_available_databases()
     if settings.DEFAULT_DB_NAME not in available_dbs:

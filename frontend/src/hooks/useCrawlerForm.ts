@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { crawlerApi, CrawlerStatus } from '../api/crawler';
 
 const SEED_URLS = [
@@ -23,16 +23,18 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
   const [crawlMode, setCrawlMode] = useState<CrawlMode>('fresh');
   const [currentSeedUrls, setCurrentSeedUrls] = useState<string[]>(SEED_URLS);
 
-  const fetchStats = async () => {
+  const refreshCrawlerStatus = useCallback(async () => {
     try {
       const data = await crawlerApi.getStatus();
       setCrawlerData(data);
       setStatus(data.status === 'running' ? 'running' : 'stopped');
+      return data;
     } catch (error) {
       setStatus('error');
       setMessage('Failed to fetch crawler status.');
+      return null;
     }
-  };
+  }, []);
 
   const handleStart = async () => {
     if (!secretKey) {
@@ -44,7 +46,7 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     setMessage('');
     try {
       await crawlerApi.start(secretKey, crawlMode, currentSeedUrls);
-      setStatus('running');
+      await refreshCrawlerStatus();
       setMessage('Crawler started successfully!');
     } catch (error) {
       setStatus('error');
@@ -62,8 +64,7 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     setMessage('');
     try {
       await crawlerApi.stop(secretKey);
-      setStatus('stopped');
-      setCrawlerData({ status: 'stopped', statistics: { urls_crawled: 0, urls_failed: 0, urls_in_queue: 0 } });
+      await refreshCrawlerStatus();
       setMessage('Crawler stopped successfully!');
     } catch (error) {
       setStatus('error');
@@ -84,6 +85,22 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     }
   };
 
+  useEffect(() => {
+    refreshCrawlerStatus();
+  }, [refreshCrawlerStatus]);
+
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval>;
+    if (status === 'running') {
+      intervalId = setInterval(refreshCrawlerStatus, 5000);
+    }
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [status, refreshCrawlerStatus]);
+
   return {
     SEED_URLS,
     currentSeedUrls,
@@ -98,7 +115,7 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     handleStop,
     handleShowFailedUrls,
     setFailedUrls,
-    refreshStats: fetchStats,
+    refreshStats: refreshCrawlerStatus,
     crawlMode,
     setCrawlMode,
   };

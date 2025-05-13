@@ -77,6 +77,7 @@ async def setup_connections(db_name: str = get_current_db()) -> None:
     """Set up both engine and session factory for the specified database"""
     await setup_engine(db_name)
     await setup_session_factory(db_name)
+    set_current_db(db_name)
     logger.info(f"Set up connections for database: {db_name}")
 
 
@@ -122,21 +123,17 @@ async def init_db(db_name: str = get_current_db()) -> None:
     """Initialize a new database with all required tables"""
     logger.info(f"Initializing database {db_name}")
 
-    # Create the database file if it doesn't exist
     db_path = get_db_path(db_name)
     if not os.path.exists(db_path):
         logger.info(f"Creating new database file: {db_path}")
-        # Create an empty file
         with open(db_path, "w") as f:
             pass
 
-    # Set up connections to the new database
     await setup_connections(db_name)
+    set_current_db(db_name)
 
-    # Create all tables
     await create_tables(await get_engine())
 
-    # Add to available databases if not already present
     available_dbs = get_available_databases()
     if db_name not in available_dbs:
         available_dbs.append(db_name)
