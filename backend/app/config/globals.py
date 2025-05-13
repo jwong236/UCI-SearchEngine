@@ -7,6 +7,8 @@ import logging
 from typing import Optional, List, Any
 import asyncio
 from pathlib import Path
+import os
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -41,9 +43,34 @@ def set_current_db(db_name: str) -> None:
     logger.info(f"Current database set to: {db_name}")
 
 
+def get_db_path(db_name: str) -> str:
+    """Get the full path to a database file
+
+    Args:
+        db_name: Name of the database
+
+    Returns:
+        Full path to the database file
+    """
+    os.makedirs(settings.DB_DIR, exist_ok=True)
+    return os.path.join(settings.DB_DIR, f"{db_name}.sqlite")
+
+
 def get_available_databases() -> List[str]:
-    """Get list of available databases"""
-    return _available_databases
+    """Get list of available databases by scanning the database directory
+
+    Returns:
+        List of database names (without .sqlite extension)
+    """
+    os.makedirs(settings.DB_DIR, exist_ok=True)
+    databases = []
+
+    for filename in os.listdir(settings.DB_DIR):
+        if filename.endswith(".sqlite"):
+            db_name = os.path.splitext(filename)[0]
+            databases.append(db_name)
+
+    return sorted(databases)
 
 
 def set_available_databases(databases: List[str]) -> None:

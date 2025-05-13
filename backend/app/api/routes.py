@@ -7,6 +7,7 @@ from fastapi import (
     Header,
     UploadFile,
     File,
+    Form,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -42,9 +43,11 @@ from ..config.globals import (
     set_crawler_running,
     set_crawler_task,
     set_current_crawler,
+    get_db_path,
 )
 from ..config.settings import settings
 from sqlalchemy import select, delete, update
+from fastapi.responses import FileResponse
 
 router = APIRouter()
 
@@ -78,9 +81,19 @@ async def switch_database(db_name: str, secret_key: str):
 
 
 @router.delete("/databases/{db_name}")
-async def delete_database(db_name: str, secret_key: str):
-    """Delete a database"""
-    if secret_key != settings.SECRET_KEY:
+async def delete_database(
+    db_name: str, x_secret_key: Optional[str] = Header(None, alias="X-Secret-Key")
+):
+    """Delete a database file
+
+    Args:
+        db_name: Name of the database to delete
+        x_secret_key: Secret key for authentication
+
+    Returns:
+        Message confirming deletion
+    """
+    if not x_secret_key or x_secret_key != settings.SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid secret key")
 
     if db_name not in get_available_databases():
@@ -92,15 +105,18 @@ async def delete_database(db_name: str, secret_key: str):
     if db_name == settings.DEFAULT_DB_NAME:
         raise HTTPException(status_code=400, detail="Cannot delete default database")
 
-    db_path = os.path.join(settings.DB_DIR, f"{db_name}.sqlite")
+    db_path = get_db_path(db_name)
     os.remove(db_path)
     return {"message": f"Deleted database: {db_name}"}
 
 
 @router.post("/databases/upload")
-async def upload_database(file: UploadFile = File(...), secret_key: str = None):
+async def upload_database(
+    file: UploadFile = File(...),
+    x_secret_key: Optional[str] = Header(None, alias="X-Secret-Key"),
+):
     """Upload a new database file"""
-    if secret_key != settings.SECRET_KEY:
+    if not x_secret_key or x_secret_key != settings.SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid secret key")
 
     if not file.filename.endswith(".sqlite"):
@@ -365,3 +381,26 @@ async def get_failed_urls():
                 for doc in failed_docs
             ]
         }
+
+
+@router.get("/databases/{db_name}/download")
+async def download_database(
+    db_name: str, x_secret_key: Optional[str] = Header(None, alias="X-Secret-Key")
+):
+    """Download a database file"""
+    if not x_secret_key or x_secret_key != settings.SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid secret key")
+
+    if db_name not in get_available_databases():
+        raise HTTPException(status_code=404, detail="Database not found")
+
+    db_path = get_db_path(db_name)
+
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+
+    return FileResponse(
+        path=db_path,
+        filename=f"{db_name}.sqlite",
+        media_type="application/octet-stream",
+    )

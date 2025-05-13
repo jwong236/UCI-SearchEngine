@@ -26,6 +26,7 @@ from .models import (
     InvertedIndex,
     CrawlerState,
 )  # Import Base and models
+from fastapi import UploadFile
 
 # Global engine and session factory
 _engine: Optional[create_async_engine] = None
@@ -158,8 +159,28 @@ def generate_new_db_name() -> str:
     return f"db_{timestamp}"
 
 
-def handle_uploaded_db(file_path: str) -> str:
-    new_db_name = generate_new_db_name()
+async def handle_uploaded_db(file: UploadFile) -> str:
+    """Handle an uploaded database file and save it with a unique name
+
+    Args:
+        file: The uploaded database file
+
+    Returns:
+        The name of the saved database file (without extension)
+    """
+    original_name = os.path.splitext(file.filename)[0]
+    available_dbs = get_available_databases()
+
+    if original_name in available_dbs:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_db_name = f"{original_name}_{timestamp}"
+    else:
+        new_db_name = original_name
+
     new_db_path = get_db_path(new_db_name)
-    shutil.copy2(file_path, new_db_path)
+    content = await file.read()
+
+    with open(new_db_path, "wb") as f:
+        f.write(content)
+
     return new_db_name

@@ -9,10 +9,39 @@ import {
   FormControl,
   InputLabel,
   Alert,
-  Snackbar
+  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField
 } from '@mui/material';
 import { Upload as UploadIcon, Delete as DeleteIcon, Download as DownloadIcon } from '@mui/icons-material';
 import axios from 'axios';
+
+// Add File System Access API type declarations
+interface FileSystemFileHandle {
+  createWritable(): Promise<FileSystemWritableFileStream>;
+}
+
+interface FileSystemWritableFileStream extends WritableStream {
+  write(data: any): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface ShowSaveFilePickerOptions {
+  suggestedName?: string;
+  types?: Array<{
+    description: string;
+    accept: Record<string, string[]>;
+  }>;
+}
+
+declare global {
+  interface Window {
+    showSaveFilePicker(options?: ShowSaveFilePickerOptions): Promise<FileSystemFileHandle>;
+  }
+}
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -32,6 +61,8 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
   const [databases, setDatabases] = useState<DatabaseInfo>({ current: '', available: [] });
   const [selectedDb, setSelectedDb] = useState<string>('');
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [downloadDialog, setDownloadDialog] = useState(false);
+  const [downloadFilename, setDownloadFilename] = useState('');
 
   /**
    * Fetches available databases and sets the current one
@@ -39,6 +70,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
   const fetchDatabases = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/databases`);
+      console.log(response.data);
       setDatabases(response.data);
       setSelectedDb(response.data.current || '');
     } catch (error) {
@@ -67,8 +99,22 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     }
   };
 
+  /**
+   * Opens the download dialog with default filename (without extension)
+   */
+  const openDownloadDialog = () => {
+    setDownloadFilename(selectedDb);
+    setDownloadDialog(true);
+  };
+
+  /**
+   * Downloads the database file with the specified filename while enforcing the .sqlite extension
+   */
   const handleDownloadDatabase = async () => {
-    if (!selectedDb || !secretKey) return;
+    if (!selectedDb || !secretKey) {
+      setMessage({ type: 'error', text: 'No database selected or missing secret key' });
+      return;
+    }
     
     try {
       const response = await axios.get(`${API_BASE_URL}/databases/${selectedDb}/download`, {
@@ -78,20 +124,77 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
         responseType: 'blob'
       });
       
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${selectedDb}.sqlite`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const blob = new Blob([response.data], {
+        type: 'application/octet-stream'
+      });
       
-      setMessage({ type: 'success', text: 'Database downloaded successfully' });
+      // Get base filename without extension
+      let filename = downloadFilename.trim();
+      
+      // Remove any existing extension from user input
+      filename = filename.replace(/\.[^/.]+$/, "");
+      
+      // If filename is empty, use the selectedDb name
+      if (!filename) {
+        filename = selectedDb;
+      }
+      
+      if ('showSaveFilePicker' in window) {
+        try {
+          const fileHandle = await window.showSaveFilePicker({
+            suggestedName: `${filename}.sqlite`,
+            types: [{
+              description: 'SQLite Database',
+              accept: {'application/octet-stream': ['.sqlite']}
+            }]
+          });
+          
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          
+          setMessage({ type: 'success', text: 'Database downloaded successfully' });
+        } catch (saveError) {
+          console.error('Failed to save using File System Access API:', saveError);
+          downloadUsingBlob(blob, `${filename}.sqlite`);
+        }
+      } else {
+        downloadUsingBlob(blob, `${filename}.sqlite`);
+      }
+      
+      setDownloadDialog(false);
     } catch (error) {
       console.error('Failed to download database:', error);
-      setMessage({ type: 'error', text: 'Failed to download database' });
+      
+      if (axios.isAxiosError(error)) {
+        setMessage({ 
+          type: 'error', 
+          text: `Download failed: ${error.response?.status || 'Unknown'} - ${error.message}` 
+        });
+      } else {
+        setMessage({ type: 'error', text: `Download failed: ${error}` });
+      }
+      
+      setDownloadDialog(false);
     }
+  };
+
+  /**
+   * Downloads a blob using the traditional download method
+   */
+  const downloadUsingBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    link.setAttribute('target', '_blank');
+    document.body.appendChild(link);
+    link.click();
+    
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }, 100);
   };
 
   const handleUploadDatabase = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -100,7 +203,6 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('secret_key', secretKey);
 
     try {
       await axios.post(`${API_BASE_URL}/databases/upload`, formData, {
@@ -110,7 +212,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
         }
       });
       setMessage({ type: 'success', text: 'Database uploaded successfully' });
-      fetchDatabases();
+      await fetchDatabases();
     } catch (error) {
       console.error('Failed to upload database:', error);
       setMessage({ type: 'error', text: 'Failed to upload database' });
@@ -132,10 +234,15 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
         }
       });
       setMessage({ type: 'success', text: 'Database deleted successfully' });
-      fetchDatabases();
+      await fetchDatabases();
     } catch (error) {
       console.error('Failed to delete database:', error);
-      setMessage({ type: 'error', text: 'Failed to delete database' });
+      if (axios.isAxiosError(error)) {
+        const errorMessage = error.response?.data?.detail || error.message;
+        setMessage({ type: 'error', text: `Failed to delete database: ${errorMessage}` });
+      } else {
+        setMessage({ type: 'error', text: 'Failed to delete database' });
+      }
     }
   };
 
@@ -174,7 +281,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
           <Button
             variant="outlined"
             startIcon={<DownloadIcon />}
-            onClick={handleDownloadDatabase}
+            onClick={openDownloadDialog}
             disabled={!selectedDb}
           >
             Download
@@ -206,6 +313,36 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
           </Button>
         </Stack>
       </Stack>
+
+      <Dialog 
+        open={downloadDialog} 
+        onClose={() => setDownloadDialog(false)}
+        aria-labelledby="download-dialog-title"
+        container={() => document.getElementById('root') || document.body}
+      >
+        <DialogTitle id="download-dialog-title">Download Database</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Filename (without extension)"
+            type="text"
+            fullWidth
+            value={downloadFilename}
+            onChange={(e) => setDownloadFilename(e.target.value)}
+            helperText="Enter a name for the downloaded file. The .sqlite extension will be added automatically."
+            slotProps={{
+              input: {
+                endAdornment: <Typography color="text.secondary">.sqlite</Typography>
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDownloadDialog(false)}>Cancel</Button>
+          <Button onClick={handleDownloadDatabase} variant="contained">Download</Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={!!message}
