@@ -11,15 +11,13 @@ from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
-from typing import Set, List, Dict, Optional
+from typing import List, Optional
 from ..config.globals import (
     logger,
-    get_current_db,
     is_crawler_running,
     set_crawler_running,
     get_crawler_task,
     set_crawler_task,
-    get_current_crawler,
     set_current_crawler,
     get_seed_urls,
     set_seed_urls,
@@ -28,9 +26,7 @@ from ..database.connection import get_db
 from ..database.models import (
     Document,
     DocumentRelationship,
-    DomainRateLimit,
     CrawlStatistics,
-    Statistics,
     Term,
     InvertedIndex,
     CrawlerState,
@@ -96,6 +92,18 @@ class CrawlerService:
         self.visited = set()
         self.failed = set()
 
+        async with get_db() as db:
+            existing_docs = await db.execute(
+                select(Document).where(Document.is_crawled == True)
+            )
+            existing_docs = existing_docs.scalars().all()
+
+            for doc in existing_docs:
+                if doc.crawl_failed:
+                    self.failed.add(doc.url)
+                else:
+                    self.visited.add(doc.url)
+
         self.to_visit.extend(seed_urls)
         await broadcast_log(f"Initialized crawler with {len(seed_urls)} seed URLs")
 
@@ -126,6 +134,7 @@ class CrawlerService:
     async def _crawl(self, seed_urls: List[str]) -> None:
         try:
             async with get_db() as db:
+                # Initialize statistics
                 self.stats = CrawlStatistics(
                     urls_crawled=0,
                     urls_failed=0,
@@ -134,15 +143,18 @@ class CrawlerService:
                 )
                 db.add(self.stats)
 
+                # Initialize or update crawler state
                 state = CrawlerState(
                     current_url=seed_urls[0] if seed_urls else None,
-                    urls_visited=0,
-                    urls_failed=0,
-                    urls_queued=len(seed_urls),
+                    urls_visited=len(self.visited),
+                    urls_failed=len(self.failed),
+                    urls_queued=len(self.to_visit),
+                    updated_at=datetime.now(timezone.utc),
                 )
                 db.add(state)
                 await db.commit()
 
+                # Initialize queue with seed URLs if empty
                 if not self.to_visit:
                     self.to_visit.extend(seed_urls)
                     await broadcast_log(
@@ -150,7 +162,7 @@ class CrawlerService:
                     )
 
                 await broadcast_log(
-                    f"Starting crawl with {len(self.to_visit)} seed URLs"
+                    f"Starting crawl with {len(self.to_visit)} URLs in queue"
                 )
                 await broadcast_log(
                     f"Queue content: {', '.join(self.to_visit[:3])}{'...' if len(self.to_visit) > 3 else ''}"
@@ -192,6 +204,7 @@ class CrawlerService:
                             f"Parsed content from {url}, title: {title[:30]}{'...' if len(title) > 30 else ''}"
                         )
 
+                        # Update or create document
                         existing_doc = await self._document_exists(db, url)
                         if existing_doc:
                             existing_doc.title = title
@@ -216,6 +229,7 @@ class CrawlerService:
                         await db.flush()
                         await broadcast_log(f"Added document to database, ID: {doc.id}")
 
+                        # Extract and process new URLs
                         new_urls = set()
                         for link in soup.find_all("a", href=True):
                             href = link["href"]
@@ -228,11 +242,13 @@ class CrawlerService:
                                 and normalized_url not in self.failed
                                 and normalized_url not in self.to_visit
                                 and normalized_url != url
+                                and self._is_valid_uci_url(normalized_url)
                             ):
                                 new_urls.add(normalized_url)
 
                         await broadcast_log(f"Found {len(new_urls)} new URLs on {url}")
 
+                        # Process new URLs and create relationships
                         for new_url in new_urls:
                             if new_url not in self.to_visit:
                                 self.to_visit.append(new_url)
@@ -273,6 +289,7 @@ class CrawlerService:
                                 f"Found URLs: {', '.join(sample_urls)}{'...' if len(new_urls) > 3 else ''}"
                             )
 
+                        # Update crawler state
                         self.visited.add(url)
                         state.current_url = url
                         state.urls_visited += 1
@@ -288,14 +305,27 @@ class CrawlerService:
                         try:
                             await db.rollback()
 
+                            # Update failed state
                             state = await db.execute(
-                                select(CrawlerState).order_by(CrawlerState.id.desc())
+                                select(CrawlerState)
+                                .order_by(CrawlerState.id.desc())
+                                .limit(1)
                             )
                             state = state.scalar_one_or_none()
 
                             if state:
                                 state.urls_failed += 1
+                                state.updated_at = datetime.now(timezone.utc)
                                 await db.commit()
+
+                            # Update document error state
+                            doc = await self._document_exists(db, url)
+                            if doc:
+                                doc.crawl_failed = True
+                                doc.error_message = str(e)
+                                doc.last_crawled_at = datetime.now(timezone.utc)
+                                await db.commit()
+
                         except Exception as recovery_error:
                             await broadcast_log(
                                 f"Failed to recover from error: {str(recovery_error)}"

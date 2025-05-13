@@ -7,14 +7,11 @@ from fastapi import (
     Header,
     UploadFile,
     File,
-    Form,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from ..database.connection import (
     get_db,
-    get_session_factory,
-    get_engine,
     handle_uploaded_db,
     setup_connections,
 )
@@ -144,36 +141,59 @@ async def start_crawler(
                 await db.execute(delete(DocumentRelationship))
                 await db.execute(delete(InvertedIndex))
                 await db.execute(delete(Document))
-
                 await db.execute(delete(CrawlStatistics))
                 await db.execute(delete(CrawlerState))
-
                 await db.commit()
 
                 crawler = CrawlerService()
                 await crawler.start(seed_urls)
 
             elif mode == "continue":
-                crawler = get_current_crawler()
-                if crawler:
-                    await crawler.start(crawler.to_visit)
-                else:
+                state = await db.execute(
+                    select(CrawlerState).order_by(CrawlerState.id.desc())
+                )
+                state = state.scalar_one_or_none()
+
+                if not state:
                     raise HTTPException(
-                        status_code=400, detail="No crawler instance found to continue"
+                        status_code=400,
+                        detail="No previous crawler state found to continue from",
                     )
+
+                uncrawled_docs = await db.execute(
+                    select(Document)
+                    .where(Document.is_crawled == False)
+                    .where(Document.crawl_failed == False)
+                )
+                uncrawled_docs = uncrawled_docs.scalars().all()
+                urls_to_visit = [doc.url for doc in uncrawled_docs]
+
+                if not urls_to_visit:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No URLs found to continue crawling from",
+                    )
+
+                await broadcast_log(
+                    f"Continue mode: Resuming with {len(urls_to_visit)} uncrawled URLs"
+                )
+                crawler = CrawlerService()
+                await crawler.start(urls_to_visit)
 
             elif mode == "recrawl":
                 await broadcast_log(f"Recrawl mode: Resetting crawl status")
 
                 await db.execute(
                     update(Document).values(
-                        is_crawled=False, crawl_failed=False, error_message=None
+                        is_crawled=False,
+                        crawl_failed=False,
+                        error_message=None,
+                        last_crawled_at=None,
                     )
                 )
 
                 await db.execute(delete(CrawlStatistics))
                 await db.execute(delete(CrawlerState))
-
                 await db.commit()
 
                 crawler = CrawlerService()
@@ -217,8 +237,11 @@ async def get_crawler_status():
     """Get crawler status"""
     async with get_db() as db:
         state = (
-            await db.execute(select(CrawlerState).order_by(CrawlerState.id.desc()))
+            await db.execute(
+                select(CrawlerState).order_by(CrawlerState.id.desc()).limit(1)
+            )
         ).scalar_one_or_none()
+
         return {
             "status": "running" if is_crawler_running() else "stopped",
             "statistics": {
@@ -357,30 +380,33 @@ async def set_seed_urls(urls: List[str], secret_key: str = None):
 @router.get("/crawler/failed-urls")
 async def get_failed_urls():
     """Get list of URLs that failed during crawling"""
-    crawler = get_current_crawler()
-    if not crawler:
-        return {"failed_urls": []}
+    try:
+        async with get_db() as db:
+            failed_docs = await db.execute(
+                select(Document)
+                .where(Document.crawl_failed == True)
+                .order_by(Document.last_crawled_at.desc())
+                .limit(1000)
+            )
+            failed_docs = failed_docs.scalars().all()
 
-    async with get_db() as db:
-        failed_docs = await db.execute(
-            select(Document)
-            .where(Document.crawl_failed == True)
-            .order_by(Document.last_crawled_at.desc())
-        )
-        failed_docs = failed_docs.scalars().all()
-
-        return {
-            "failed_urls": [
-                {
-                    "url": doc.url,
-                    "error": doc.error_message,
-                    "failed_at": (
-                        doc.last_crawled_at.isoformat() if doc.last_crawled_at else None
-                    ),
-                }
-                for doc in failed_docs
-            ]
-        }
+            return {
+                "failed_urls": [
+                    {
+                        "url": doc.url,
+                        "error": doc.error_message,
+                        "failed_at": (
+                            doc.last_crawled_at.isoformat()
+                            if doc.last_crawled_at
+                            else None
+                        ),
+                    }
+                    for doc in failed_docs
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error fetching failed URLs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch failed URLs")
 
 
 @router.get("/databases/{db_name}/download")

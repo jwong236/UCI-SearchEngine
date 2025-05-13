@@ -58,6 +58,7 @@ export function Crawler() {
     setCurrentSeedUrls,
     status,
     message,
+    setMessage,
     isRunning,
     stats,
     failedUrls,
@@ -72,7 +73,6 @@ export function Crawler() {
   } = useCrawlerForm({ secretKey });
 
   const { logs, clearLogs } = useCrawlerLogs();
-  const [showFailed, setShowFailed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   const handleRefresh = useCallback(async () => {
@@ -80,17 +80,8 @@ export function Crawler() {
   }, [refreshStats]);
 
   const handleClearMessage = useCallback(() => {
-    setFailedUrls(null);
-  }, [setFailedUrls]);
-
-  useEffect(() => {
-    if (showFailed && !failedUrls) {
-      handleShowFailedUrls();
-    }
-    if (!showFailed) {
-      setFailedUrls(null);
-    }
-  }, [showFailed, failedUrls, handleShowFailedUrls, setFailedUrls]);
+    setMessage('');
+  }, [setMessage]);
 
   return (
     <Box 
@@ -142,6 +133,7 @@ export function Crawler() {
         onShowFailedUrls={handleShowFailedUrls}
         onClearMessage={handleClearMessage}
         failedLoading={failedLoading}
+        failedUrls={failedUrls}
       />
       <DatabaseManagement secretKey={secretKey} />
       <RealTimeLogsCard logs={logs} onClear={clearLogs} />
@@ -176,47 +168,6 @@ export function Crawler() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowSettings(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Failed URLs Dialog */}
-      <Dialog 
-        open={showFailed} 
-        onClose={() => setShowFailed(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Failed URLs</DialogTitle>
-        <DialogContent>
-          {failedLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-              <CircularProgress />
-            </Box>
-          ) : failedUrls && failedUrls.length > 0 ? (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>URL</TableCell>
-                    <TableCell>Error</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {failedUrls.map((url, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{url.url}</TableCell>
-                      <TableCell>{url.error}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Typography>No failed URLs to display.</Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowFailed(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

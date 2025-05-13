@@ -70,7 +70,6 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
   const fetchDatabases = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/databases`);
-      console.log(response.data);
       setDatabases(response.data);
       setSelectedDb(response.data.current || '');
     } catch (error) {

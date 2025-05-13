@@ -7,10 +7,28 @@ import {
   IconButton,
   Tooltip,
   Collapse,
-  Alert
+  Alert,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  CircularProgress
 } from '@mui/material';
-import { Settings as SettingsIcon, Close as CloseIcon } from '@mui/icons-material';
-import { useState } from 'react';
+import { 
+  Settings as SettingsIcon, 
+  Close as CloseIcon,
+  KeyboardArrowDown as ExpandMoreIcon,
+  KeyboardArrowUp as ExpandLessIcon
+} from '@mui/icons-material';
+import { useState, useEffect } from 'react';
+
+interface FailedUrl {
+  url: string;
+  error: string;
+  failed_at: string | null;
+}
 
 interface ControlPanelProps {
   showSettings: boolean;
@@ -24,6 +42,7 @@ interface ControlPanelProps {
   onShowFailedUrls: () => void;
   onClearMessage: () => void;
   failedLoading: boolean;
+  failedUrls: FailedUrl[] | null;
 }
 
 export function ControlPanel({ 
@@ -37,15 +56,26 @@ export function ControlPanel({
   onStop,
   onShowFailedUrls,
   onClearMessage,
-  failedLoading
+  failedLoading,
+  failedUrls
 }: ControlPanelProps) {
   const [showFailed, setShowFailed] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (showFailed && !failedUrls) {
+      onShowFailedUrls();
+    }
+  }, [showFailed, failedUrls, onShowFailedUrls]);
 
   const handleShowFailed = () => {
     setShowFailed((prev) => !prev);
-    if (!showFailed) {
-      onShowFailedUrls();
-    }
+  };
+
+  const toggleRowExpansion = (index: number) => {
+    setExpandedRows(prev => 
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
   };
 
   return (
@@ -59,27 +89,37 @@ export function ControlPanel({
         </Tooltip>
       </Box>
       
-      <Collapse in={!!message}>
+      <Collapse in={!!message} sx={{ mb: 3 }}>
         {message && (
           <Alert 
             severity={status === 'error' ? 'error' : 'success'}
-            action={
-              <IconButton
-                aria-label="close"
-                color="inherit"
-                size="small"
-                onClick={onClearMessage}
-              >
-                <CloseIcon fontSize="inherit" />
-              </IconButton>
-            }
-            sx={{ borderRadius: 1 }}
+            onClose={onClearMessage}
+            sx={{ 
+              borderRadius: 1,
+              '& .MuiAlert-action': {
+                alignItems: 'center',
+                padding: '4px 0 4px 8px',
+                '& .MuiIconButton-root': {
+                  padding: '4px',
+                  '&:hover': {
+                    backgroundColor: 'rgba(0, 0, 0, 0.04)'
+                  }
+                }
+              },
+              '& .MuiAlert-icon': {
+                padding: '8px 0 8px 16px'
+              },
+              '& .MuiAlert-message': {
+                padding: '8px 0'
+              }
+            }}
           >
             {message}
           </Alert>
         )}
       </Collapse>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center" alignItems="center">
+      
+      <Stack direction="row" spacing={2}>
         <Button 
           variant={showFailed ? 'contained' : 'outlined'}
           color={showFailed ? 'info' : 'info'}
@@ -115,6 +155,78 @@ export function ControlPanel({
           Stop Crawler
         </Button>
       </Stack>
+
+      <Collapse in={showFailed} sx={{ mt: 2 }}>
+        <Paper elevation={0} sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1 }}>
+          {failedLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : failedUrls && failedUrls.length > 0 ? (
+            <TableContainer sx={{ width: '100%' }}>
+              <Table size="small" sx={{ tableLayout: 'fixed' }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell width="25%">URL</TableCell>
+                    <TableCell width="35%">Error</TableCell>
+                    <TableCell width="15%">Failed At</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {failedUrls.map((url, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell width="45%" sx={{ maxWidth: '45%' }}>
+                        <Typography sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {url.url}
+                        </Typography>
+                        <Collapse in={expandedRows.includes(idx)} timeout="auto" unmountOnExit>
+                          <Box sx={{ mt: 1, maxWidth: '100%' }}>
+                            <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>
+                              Full URL:
+                            </Typography>
+                            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: 'rgba(0,0,0,0.04)', p: 1, borderRadius: 1, fontSize: '0.75rem' }}>
+                              {url.url}
+                            </Typography>
+                          </Box>
+                        </Collapse>
+                      </TableCell>
+                      
+                      <TableCell width="40%" sx={{ maxWidth: '40%' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {url.error}
+                          </Typography>
+                          <IconButton size="small" onClick={() => toggleRowExpansion(idx)} sx={{ ml: 0.5, p: 0.5, flexShrink: 0 }}>
+                            {expandedRows.includes(idx) ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                          </IconButton>
+                        </Box>
+                        <Collapse in={expandedRows.includes(idx)} timeout="auto" unmountOnExit>
+                          <Box sx={{ mt: 1, maxWidth: '100%' }}>
+                            <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>
+                              Full Error:
+                            </Typography>
+                            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: 'rgba(0,0,0,0.04)', p: 1, borderRadius: 1, fontSize: '0.75rem' }}>
+                              {url.error}
+                            </Typography>
+                          </Box>
+                        </Collapse>
+                      </TableCell>
+                      
+                      <TableCell width="15%" sx={{ maxWidth: '15%', whiteSpace: 'nowrap' }}>
+                        {url.failed_at ? new Date(url.failed_at).toLocaleString() : 'N/A'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+              No failed URLs to display
+            </Typography>
+          )}
+        </Paper>
+      </Collapse>
     </Paper>
   );
 } 

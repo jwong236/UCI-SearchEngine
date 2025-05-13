@@ -77,7 +77,7 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     setMessage('');
     try {
       const data = await crawlerApi.getFailedUrls();
-      setFailedUrls(data);
+      setFailedUrls(data.failed_urls);
       setFailedLoading(false);
     } catch (error) {
       setMessage('Failed to fetch failed URLs.');
@@ -107,6 +107,7 @@ export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
     setCurrentSeedUrls,
     status,
     message,
+    setMessage,
     isRunning: status === 'running',
     stats: crawlerData?.statistics,
     failedUrls,

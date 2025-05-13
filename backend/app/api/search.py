@@ -2,7 +2,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from ..database.models import Document, Term, InvertedIndex
-from .tokenizer import tokenize, get_token_frequencies
+from .tokenizer import tokenize
 
 
 class SearchService:
