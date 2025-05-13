@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { crawlerApi, CrawlerStatus } from '../api/crawler';
 
 const SEED_URLS = [
@@ -10,14 +10,18 @@ const SEED_URLS = [
 
 export type CrawlMode = 'fresh' | 'continue' | 'recrawl';
 
-export function useCrawlerForm() {
+interface UseCrawlerFormProps {
+  secretKey: string;
+}
+
+export function useCrawlerForm({ secretKey }: UseCrawlerFormProps) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'running' | 'stopped' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [crawlerData, setCrawlerData] = useState<CrawlerStatus | null>(null);
   const [failedUrls, setFailedUrls] = useState<any[] | null>(null);
   const [failedLoading, setFailedLoading] = useState(false);
-  const [secretKey, setSecretKey] = useState('');
-  const [crawlMode, setCrawlMode] = useState<CrawlMode>('continue');
+  const [crawlMode, setCrawlMode] = useState<CrawlMode>('fresh');
+  const [currentSeedUrls, setCurrentSeedUrls] = useState<string[]>(SEED_URLS);
 
   const fetchStats = async () => {
     try {
@@ -39,7 +43,7 @@ export function useCrawlerForm() {
     setStatus('loading');
     setMessage('');
     try {
-      await crawlerApi.start(secretKey, crawlMode);
+      await crawlerApi.start(secretKey, crawlMode, currentSeedUrls);
       setStatus('running');
       setMessage('Crawler started successfully!');
     } catch (error) {
@@ -59,6 +63,7 @@ export function useCrawlerForm() {
     try {
       await crawlerApi.stop(secretKey);
       setStatus('stopped');
+      setCrawlerData({ status: 'stopped', statistics: { urls_crawled: 0, urls_failed: 0, urls_in_queue: 0 } });
       setMessage('Crawler stopped successfully!');
     } catch (error) {
       setStatus('error');
@@ -81,9 +86,11 @@ export function useCrawlerForm() {
 
   return {
     SEED_URLS,
+    currentSeedUrls,
+    setCurrentSeedUrls,
     status,
     message,
-    isRunning: crawlerData?.status === 'running',
+    isRunning: status === 'running',
     stats: crawlerData?.statistics,
     failedUrls,
     failedLoading,
@@ -92,8 +99,6 @@ export function useCrawlerForm() {
     handleShowFailedUrls,
     setFailedUrls,
     refreshStats: fetchStats,
-    secretKey,
-    setSecretKey,
     crawlMode,
     setCrawlMode,
   };

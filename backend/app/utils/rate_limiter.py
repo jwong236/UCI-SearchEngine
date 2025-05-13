@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 import time
+import asyncio
 
 
 class RateLimiter:
@@ -47,6 +48,20 @@ class RateLimiter:
 
         self.last_request_time[domain] = time.time()
 
+    async def async_wait_if_needed(self, domain: str) -> None:
+        """Async version of wait_if_needed.
+
+        Args:
+            domain: Domain to check
+        """
+        current_time = time.time()
+        last_time = self.last_request_time.get(domain, 0)
+
+        if current_time - last_time < self.min_interval:
+            await asyncio.sleep(self.min_interval - (current_time - last_time))
+
+        self.last_request_time[domain] = time.time()
+
     def get_next_allowed_time(self, domain: str) -> Optional[datetime]:
         """Get next allowed request time.
 
@@ -73,13 +88,13 @@ class RateLimiter:
         Returns:
             float: Seconds to wait
         """
-        now = datetime.now()
+        current_time = time.time()
         last_time = self.last_request_time.get(domain)
 
         if not last_time:
             return 0.0
 
-        time_since_last = (now - last_time).total_seconds()
+        time_since_last = current_time - last_time
         wait_time = max(0.0, self.min_interval - time_since_last)
         return wait_time
 

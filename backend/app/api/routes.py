@@ -8,20 +8,14 @@ from fastapi import (
     UploadFile,
     File,
 )
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
-import asyncio
 from ..database.connection import (
     get_db,
     get_session_factory,
-    get_db_path,
-    init_db,
     get_engine,
-    close_connections,
-    setup_connections,
-    generate_new_db_name,
     handle_uploaded_db,
+    setup_connections,
 )
 from .crawler import CrawlerService
 from .search import SearchService
@@ -34,7 +28,6 @@ from ..database.models import (
 )
 from datetime import datetime, timezone
 import os
-import shutil
 from .websocket_utils import active_websockets, broadcast_log
 from ..config.globals import (
     logger,
@@ -42,15 +35,15 @@ from ..config.globals import (
     set_current_db,
     get_available_databases,
     is_crawler_running,
-    set_crawler_running,
-    get_crawler_task,
-    set_crawler_task,
     get_current_crawler,
-    set_current_crawler,
     get_seed_urls,
     set_seed_urls,
+    set_crawler_running,
+    set_crawler_task,
+    set_current_crawler,
 )
 from ..config.settings import settings
+from sqlalchemy import select
 
 router = APIRouter()
 
@@ -117,57 +110,92 @@ async def upload_database(file: UploadFile = File(...), secret_key: str = None):
 
 
 @router.post("/crawler/start")
-async def start_crawler(seed_urls: Optional[List[str]] = None, secret_key: str = None):
-    """Start the crawler"""
-    if secret_key != settings.SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Invalid secret key")
-
+async def start_crawler(
+    seed_urls: List[str],
+    mode: str = Query(..., description="Crawler mode: fresh, continue, or recrawl"),
+    x_secret_key: str = Depends(verify_secret_key),
+):
+    """Start the crawler with the specified seed URLs"""
     if is_crawler_running():
         raise HTTPException(status_code=400, detail="Crawler is already running")
 
-    crawler = CrawlerService()
-    await crawler.start(seed_urls)
-    return {"message": "Crawler started"}
+    try:
+        if mode == "fresh":
+            crawler = CrawlerService()
+            await crawler.start(seed_urls)
+        elif mode == "continue":
+            crawler = get_current_crawler()
+            if crawler:
+                await crawler.start(crawler.to_visit)
+            else:
+                raise HTTPException(
+                    status_code=400, detail="No crawler instance found to continue"
+                )
+        elif mode == "recrawl":
+            crawler = CrawlerService()
+            await crawler.start(seed_urls)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid mode. Must be one of: fresh, continue, recrawl",
+            )
+
+        return {"message": "Crawler started successfully"}
+
+    except Exception as e:
+        logger.error(f"Error starting crawler: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/crawler/stop")
-async def stop_crawler(secret_key: str = None):
+async def stop_crawler(x_secret_key: str = Depends(verify_secret_key)):
     """Stop the crawler"""
-    if secret_key != settings.SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Invalid secret key")
-
     if not is_crawler_running():
         raise HTTPException(status_code=400, detail="Crawler is not running")
 
-    crawler = get_current_crawler()
-    if crawler:
-        await crawler.stop()
-    return {"message": "Crawler stopped"}
+    try:
+        crawler = get_current_crawler()
+        if crawler:
+            await crawler.stop()
+            return {"message": "Crawler stopped successfully"}
+        else:
+            raise HTTPException(
+                status_code=400, detail="No crawler instance found to stop"
+            )
+    except Exception as e:
+        logger.error(f"Error stopping crawler: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/crawler/status")
 async def get_crawler_status():
     """Get crawler status"""
-    return {
-        "status": "running" if is_crawler_running() else "stopped",
-        "statistics": {
-            "urls_crawled": 0,  # TODO: Get from CrawlerState
-            "urls_failed": 0,  # TODO: Get from CrawlerState
-            "urls_in_queue": (
-                len(get_current_crawler().to_visit) if get_current_crawler() else 0
-            ),
-        },
-    }
+    async with get_db() as db:
+        state = (
+            await db.execute(select(CrawlerState).order_by(CrawlerState.id.desc()))
+        ).scalar_one_or_none()
+        return {
+            "status": "running" if is_crawler_running() else "stopped",
+            "statistics": {
+                "urls_crawled": state.urls_visited if state else 0,
+                "urls_failed": state.urls_failed if state else 0,
+                "urls_in_queue": state.urls_queued if state else 0,
+            },
+        }
 
 
 @router.get("/crawler/statistics")
-async def get_detailed_statistics(db: Session = Depends(get_db)):
-    stats = db.query(CrawlStatistics).order_by(CrawlStatistics.id.desc()).first()
+async def get_detailed_statistics(db: AsyncSession = Depends(get_db)):
+    """Get detailed crawler statistics"""
+    stats = (
+        await db.execute(select(CrawlStatistics).order_by(CrawlStatistics.id.desc()))
+    ).scalar_one_or_none()
+
     queue_size = len(get_current_crawler().to_visit) if get_current_crawler() else 0
 
-    total_documents = db.query(Document).count()
-    total_terms = db.query(Term).count()
-    total_index_entries = db.query(InvertedIndex).count()
+    total_documents = (await db.execute(select(Document))).scalars().count()
+    total_terms = (await db.execute(select(Term))).scalars().count()
+    total_index_entries = (await db.execute(select(InvertedIndex))).scalars().count()
 
     return {
         "crawler_statistics": {
@@ -193,8 +221,11 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()
-    except:
-        active_websockets.remove(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}")
+    finally:
+        if websocket in active_websockets:
+            active_websockets.remove(websocket)
 
 
 async def broadcast_log(message: str):
@@ -215,40 +246,39 @@ async def broadcast_log(message: str):
 async def run_crawler(mode: str):
     """Main crawler loop."""
     global get_current_crawler, current_db_name
-    session_factory = get_session_factory()
-    session_factory.configure(bind=get_engine(current_db_name))
-    db = session_factory()
-    try:
-        if mode == "fresh":
-            get_current_crawler = CrawlerService(db)
-            seed_urls = [
-                "https://www.ics.uci.edu",
-                "https://www.cs.uci.edu",
-                "https://www.informatics.uci.edu",
-                "https://www.stat.uci.edu",
-            ]
-            await get_current_crawler.crawl(seed_urls, mode="fresh")
-        elif mode == "continue":
-            await get_current_crawler.crawl(
-                get_current_crawler.to_visit, mode="continue"
-            )
-        elif mode == "recrawl":
-            get_current_crawler = CrawlerService(db)
-            seed_urls = [
-                "https://www.ics.uci.edu",
-                "https://www.cs.uci.edu",
-                "https://www.informatics.uci.edu",
-                "https://www.stat.uci.edu",
-            ]
-            await get_current_crawler.crawl(seed_urls, mode="recrawl")
-        await get_current_crawler.close()
-    except Exception as e:
-        logger.error(f"Crawler error: {str(e)}")
-    finally:
-        db.close()
-        global crawler_running
-        crawler_running = False
-        get_current_crawler = None
+    async with get_db() as db:
+        try:
+            if mode == "fresh":
+                crawler = CrawlerService()
+                seed_urls = [
+                    "https://www.ics.uci.edu",
+                    "https://www.cs.uci.edu",
+                    "https://www.informatics.uci.edu",
+                    "https://www.stat.uci.edu",
+                ]
+                await crawler.start(seed_urls)
+            elif mode == "continue":
+                crawler = get_current_crawler()
+                if crawler:
+                    await crawler.start(crawler.to_visit)
+            elif mode == "recrawl":
+                crawler = CrawlerService()
+                seed_urls = [
+                    "https://www.ics.uci.edu",
+                    "https://www.cs.uci.edu",
+                    "https://www.informatics.uci.edu",
+                    "https://www.stat.uci.edu",
+                ]
+                await crawler.start(seed_urls)
+
+            if crawler:
+                await crawler.close()
+        except Exception as e:
+            logger.error(f"Crawler error: {str(e)}")
+        finally:
+            set_crawler_running(False)
+            set_crawler_task(None)
+            set_current_crawler(None)
 
 
 @router.get("/search")
@@ -256,7 +286,7 @@ async def search(
     query: str = Query(..., description="Search query"),
     page: int = Query(1, description="Page number", ge=1),
     per_page: int = Query(10, description="Results per page", ge=1, le=50),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Search the crawled content."""
     search_service = SearchService(db)

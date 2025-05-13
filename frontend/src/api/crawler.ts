@@ -27,8 +27,8 @@ export interface DetailedStatistics {
 }
 
 export const crawlerApi = {
-  start: async (secretKey: string, mode: 'fresh' | 'continue' | 'recrawl') => {
-    const response = await axios.post(`${API_BASE_URL}/crawler/start`, null, {
+  start: async (secretKey: string, mode: 'fresh' | 'continue' | 'recrawl', seedUrls: string[]) => {
+    const response = await axios.post(`${API_BASE_URL}/crawler/start`, seedUrls, {
       headers: { 'X-Secret-Key': secretKey },
       params: { mode }
     });

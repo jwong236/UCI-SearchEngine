@@ -15,43 +15,45 @@ from .database.connection import (
 )
 from .config.settings import settings
 import os
+import logging
+
+# Configure SQLAlchemy logging
+logging.getLogger("sqlalchemy.engine").setLevel(logging.ERROR)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.ERROR)
+logging.getLogger("sqlalchemy.dialects").setLevel(logging.ERROR)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan management"""
-    # Startup
+    """Manage application lifespan"""
     logger.info("Starting up application...")
 
     # Ensure data directory exists
-    if not os.path.exists(settings.DB_DIR):
-        logger.info(f"Creating data directory at {settings.DB_DIR}")
-        os.makedirs(settings.DB_DIR, exist_ok=True)
+    os.makedirs(settings.DB_DIR, exist_ok=True)
 
-    # Check if default database exists
-    db_path = get_db_path(settings.DEFAULT_DB_NAME)
-    if not os.path.exists(db_path):
-        logger.info(
-            f"Default database not found at {db_path}, initializing new database..."
-        )
-        # Initialize new database with tables
-        init_db(settings.DEFAULT_DB_NAME)
+    # Initialize default database if it doesn't exist
+    default_db_path = os.path.join(
+        settings.DB_DIR, f"{settings.DEFAULT_DB_NAME}.sqlite"
+    )
+    if not os.path.exists(default_db_path):
+        logger.info("Initializing new default database...")
+        await init_db(settings.DEFAULT_DB_NAME)
     else:
-        logger.info(f"Using existing database at {db_path}")
-        # Set up connections to existing database
-        setup_connections(settings.DEFAULT_DB_NAME)
+        logger.info(f"Using existing database at {default_db_path}")
+        await setup_connections(settings.DEFAULT_DB_NAME)
 
-    # Add default database to available databases if not already present
+    # Add default database to available databases if not present
     available_dbs = get_available_databases()
     if settings.DEFAULT_DB_NAME not in available_dbs:
         available_dbs.append(settings.DEFAULT_DB_NAME)
         set_available_databases(available_dbs)
+        logger.info(f"Available databases updated: {available_dbs}")
 
+    logger.info("Application startup complete.")
     yield
-
-    # Shutdown
     logger.info("Shutting down application...")
-    close_connections()
+    await close_connections()
+    logger.info("Application shutdown complete.")
 
 
 app = FastAPI(

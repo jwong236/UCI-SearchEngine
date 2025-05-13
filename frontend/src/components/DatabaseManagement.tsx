@@ -30,7 +30,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
 
   useEffect(() => {
     fetchDatabases();
-  }, [secretKey]);
+  }, []);
 
   const fetchDatabases = async () => {
     try {
@@ -46,7 +46,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     if (!selectedDb || !secretKey) return;
     
     try {
-      const response = await fetch(`/api/database/switch?db_name=${selectedDb}`, {
+      const response = await fetch(`${API_BASE_URL}/databases/switch?db_name=${selectedDb}`, {
         method: 'POST',
         headers: {
           'X-Secret-Key': secretKey
@@ -66,8 +66,8 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     if (!selectedDb || !secretKey) return;
     
     try {
-      const response = await fetch(`/api/database/delete?db_name=${selectedDb}`, {
-        method: 'POST',
+      const response = await fetch(`${API_BASE_URL}/databases/${selectedDb}`, {
+        method: 'DELETE',
         headers: {
           'X-Secret-Key': secretKey
         }
@@ -86,7 +86,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     if (!selectedDb || !secretKey) return;
     
     try {
-      const response = await fetch('/api/crawler/download-db', {
+      const response = await fetch(`${API_BASE_URL}/databases/${selectedDb}/download`, {
         headers: {
           'X-Secret-Key': secretKey
         }
@@ -115,7 +115,7 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
     formData.append('file', file);
 
     try {
-      const response = await fetch('/api/crawler/upload-db', {
+      const response = await fetch(`${API_BASE_URL}/databases/upload`, {
         method: 'POST',
         headers: {
           'X-Secret-Key': secretKey

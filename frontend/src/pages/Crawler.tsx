@@ -51,8 +51,11 @@ function useCrawlerLogs() {
 }
 
 export function Crawler() {
+  const [secretKey, setSecretKey] = useState('');
   const {
     SEED_URLS,
+    currentSeedUrls,
+    setCurrentSeedUrls,
     status,
     isRunning,
     stats,
@@ -61,11 +64,10 @@ export function Crawler() {
     handleShowFailedUrls,
     setFailedUrls,
     refreshStats,
-    secretKey,
-    setSecretKey,
     crawlMode,
     setCrawlMode
-  } = useCrawlerForm();
+  } = useCrawlerForm({ secretKey });
+
   const { logs, clearLogs } = useCrawlerLogs();
   const [showFailed, setShowFailed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -104,12 +106,10 @@ export function Crawler() {
       
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ width: '100%', maxWidth: 900, mb: 2 }}>
         <ConfigCard 
-          seedUrls={SEED_URLS}
+          seedUrls={currentSeedUrls}
           secretKey={secretKey}
           onSecretKeyChange={setSecretKey}
-          onSeedUrlsChange={(urls) => {
-            console.log('New seed URLs:', urls);
-          }}
+          onSeedUrlsChange={setCurrentSeedUrls}
         />
         <StatusCard status={status} isRunning={isRunning} onRefresh={refreshStats} />
         <InfoCard 
