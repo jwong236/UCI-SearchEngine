@@ -16,11 +16,19 @@ from .database.connection import (
 from .config.settings import settings
 import os
 import logging
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
-# Configure SQLAlchemy logging
-logging.getLogger("sqlalchemy.engine").setLevel(logging.ERROR)
-logging.getLogger("sqlalchemy.pool").setLevel(logging.ERROR)
-logging.getLogger("sqlalchemy.dialects").setLevel(logging.ERROR)
+logging.getLogger("sqlalchemy").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.dialects").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.orm").setLevel(logging.CRITICAL)
+
+
+@event.listens_for(Engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    pass
 
 
 @asynccontextmanager
@@ -28,10 +36,14 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan"""
     logger.info("Starting up application...")
 
-    # Ensure data directory exists
+    logging.getLogger("sqlalchemy").setLevel(logging.CRITICAL)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.CRITICAL)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.CRITICAL)
+    logging.getLogger("sqlalchemy.dialects").setLevel(logging.CRITICAL)
+    logging.getLogger("sqlalchemy.orm").setLevel(logging.CRITICAL)
+
     os.makedirs(settings.DB_DIR, exist_ok=True)
 
-    # Initialize default database if it doesn't exist
     default_db_path = os.path.join(
         settings.DB_DIR, f"{settings.DEFAULT_DB_NAME}.sqlite"
     )
@@ -42,7 +54,6 @@ async def lifespan(app: FastAPI):
         logger.info(f"Using existing database at {default_db_path}")
         await setup_connections(settings.DEFAULT_DB_NAME)
 
-    # Add default database to available databases if not present
     available_dbs = get_available_databases()
     if settings.DEFAULT_DB_NAME not in available_dbs:
         available_dbs.append(settings.DEFAULT_DB_NAME)
@@ -63,7 +74,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -77,5 +87,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
 app.include_router(router, prefix="/api")

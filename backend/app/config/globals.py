@@ -8,35 +8,27 @@ from typing import Optional, List, Any
 import asyncio
 from pathlib import Path
 
-# Configure logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Create console handler
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 
-# Create formatter
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 
-# Add handler to logger
 logger.addHandler(console_handler)
 
-# Database state
 _current_db_name: str = ""
 _available_databases: List[str] = []
 
-# Crawler state
 _crawler_running: bool = False
 _crawler_task: Optional[asyncio.Task] = None
-_current_crawler: Optional[Any] = None  # Type will be CrawlerService
+_current_crawler: Optional[Any] = None
 
-# Seed URLs
 _seed_urls: List[str] = []
 
 
-# Database state management
 def get_current_db() -> str:
     """Get the current database name"""
     return _current_db_name
@@ -61,7 +53,6 @@ def set_available_databases(databases: List[str]) -> None:
     logger.info(f"Available databases updated: {databases}")
 
 
-# Crawler state management
 def is_crawler_running() -> bool:
     """Check if crawler is running"""
     return _crawler_running
@@ -86,19 +77,18 @@ def set_crawler_task(task: Optional[asyncio.Task]) -> None:
     logger.info("Crawler task updated")
 
 
-def get_current_crawler() -> Optional[Any]:  # Type will be CrawlerService
+def get_current_crawler() -> Optional[Any]:
     """Get current crawler instance"""
     return _current_crawler
 
 
-def set_current_crawler(crawler: Optional[Any]) -> None:  # Type will be CrawlerService
+def set_current_crawler(crawler: Optional[Any]) -> None:
     """Set current crawler instance"""
     global _current_crawler
     _current_crawler = crawler
     logger.info("Crawler instance updated")
 
 
-# Seed URLs management
 def get_seed_urls() -> List[str]:
     """Get current seed URLs"""
     return _seed_urls

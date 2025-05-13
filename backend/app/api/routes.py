@@ -25,6 +25,7 @@ from ..database.models import (
     Term,
     InvertedIndex,
     CrawlerState,
+    DocumentRelationship,
 )
 from datetime import datetime, timezone
 import os
@@ -43,7 +44,7 @@ from ..config.globals import (
     set_current_crawler,
 )
 from ..config.settings import settings
-from sqlalchemy import select
+from sqlalchemy import select, delete, update
 
 router = APIRouter()
 
@@ -120,27 +121,55 @@ async def start_crawler(
         raise HTTPException(status_code=400, detail="Crawler is already running")
 
     try:
-        if mode == "fresh":
-            crawler = CrawlerService()
-            await crawler.start(seed_urls)
-        elif mode == "continue":
-            crawler = get_current_crawler()
-            if crawler:
-                await crawler.start(crawler.to_visit)
+        async with get_db() as db:
+            if mode == "fresh":
+                await broadcast_log(f"Fresh mode: Clearing existing database content")
+
+                await db.execute(delete(DocumentRelationship))
+                await db.execute(delete(InvertedIndex))
+                await db.execute(delete(Document))
+
+                await db.execute(delete(CrawlStatistics))
+                await db.execute(delete(CrawlerState))
+
+                await db.commit()
+
+                crawler = CrawlerService()
+                await crawler.start(seed_urls)
+
+            elif mode == "continue":
+                crawler = get_current_crawler()
+                if crawler:
+                    await crawler.start(crawler.to_visit)
+                else:
+                    raise HTTPException(
+                        status_code=400, detail="No crawler instance found to continue"
+                    )
+
+            elif mode == "recrawl":
+                await broadcast_log(f"Recrawl mode: Resetting crawl status")
+
+                await db.execute(
+                    update(Document).values(
+                        is_crawled=False, crawl_failed=False, error_message=None
+                    )
+                )
+
+                await db.execute(delete(CrawlStatistics))
+                await db.execute(delete(CrawlerState))
+
+                await db.commit()
+
+                crawler = CrawlerService()
+                await crawler.start(seed_urls)
+
             else:
                 raise HTTPException(
-                    status_code=400, detail="No crawler instance found to continue"
+                    status_code=400,
+                    detail="Invalid mode. Must be one of: fresh, continue, recrawl",
                 )
-        elif mode == "recrawl":
-            crawler = CrawlerService()
-            await crawler.start(seed_urls)
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid mode. Must be one of: fresh, continue, recrawl",
-            )
 
-        return {"message": "Crawler started successfully"}
+        return {"message": f"Crawler started successfully in {mode} mode"}
 
     except Exception as e:
         logger.error(f"Error starting crawler: {str(e)}")
