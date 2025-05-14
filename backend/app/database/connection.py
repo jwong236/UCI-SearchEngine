@@ -46,15 +46,12 @@ async def setup_engine(db_name: str = get_current_db()) -> None:
     if _engine is not None:
         await _engine.dispose()
 
-    # Ensure the database directory exists
     os.makedirs(settings.DB_DIR, exist_ok=True)
-
-    # Create the database URL with the full path
     db_path = get_db_path(db_name)
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
     _engine = create_async_engine(
-        db_url, echo=True, future=True, connect_args={"check_same_thread": False}
+        db_url, echo=True, connect_args={"check_same_thread": False}
     )
     logger.info(f"Set up engine for database: {db_name}")
 
@@ -65,11 +62,7 @@ async def setup_session_factory(db_name: str = get_current_db()) -> None:
     if _engine is None:
         await setup_engine(db_name)
     _session_factory = async_sessionmaker(
-        _engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
+        _engine, class_=AsyncSession, expire_on_commit=False
     )
     logger.info(f"Set up session factory for database: {db_name}")
 

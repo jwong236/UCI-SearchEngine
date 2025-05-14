@@ -60,7 +60,7 @@ class CrawlerService:
         self.failed = set()
         self.stats = None
         self.rate_limiter = RateLimiter(requests_per_second=1.0)
-
+        self.semaphore = asyncio.Semaphore(1)
         self.client = httpx.AsyncClient(
             timeout=60.0,
             follow_redirects=True,
@@ -179,163 +179,184 @@ class CrawlerService:
                         continue
 
                     try:
-                        await broadcast_log(f"Crawling: {url}")
+                        async with self.semaphore:  # Limit concurrent crawls
+                            await broadcast_log(f"Crawling: {url}")
 
-                        domain = urlparse(url).netloc
-                        await self.rate_limiter.async_wait_if_needed(domain)
+                            domain = urlparse(url).netloc
+                            await self.rate_limiter.async_wait_if_needed(domain)
 
-                        start_time = datetime.now(timezone.utc)
-                        await broadcast_log(f"Sending request to: {url}")
+                            start_time = datetime.now(timezone.utc)
+                            await broadcast_log(f"Sending request to: {url}")
 
-                        response = await self.client.get(url)
-                        response.raise_for_status()
+                            response = await self.client.get(url)
+                            response.raise_for_status()
 
-                        end_time = datetime.now(timezone.utc)
-                        duration = (end_time - start_time).total_seconds()
-                        await broadcast_log(
-                            f"Received response from {url} in {duration:.2f} seconds"
-                        )
-
-                        soup = BeautifulSoup(response.text, "html.parser")
-                        title = soup.title.string if soup.title else url
-                        content = soup.get_text()
-
-                        await broadcast_log(
-                            f"Parsed content from {url}, title: {title[:30]}{'...' if len(title) > 30 else ''}"
-                        )
-
-                        # Update or create document
-                        existing_doc = await self._document_exists(db, url)
-                        if existing_doc:
-                            existing_doc.title = title
-                            existing_doc.content = content
-                            existing_doc.last_crawled_at = datetime.now(timezone.utc)
-                            existing_doc.is_crawled = True
-                            existing_doc.crawl_failed = False
-                            existing_doc.error_message = None
-                            doc = existing_doc
-                        else:
-                            doc = Document(
-                                url=url,
-                                title=title,
-                                content=content,
-                                last_crawled_at=datetime.now(timezone.utc),
-                                is_crawled=True,
-                                crawl_failed=False,
-                                error_message=None,
-                            )
-                            db.add(doc)
-
-                        await db.flush()
-                        await broadcast_log(f"Added document to database, ID: {doc.id}")
-
-                        # Extract and process new URLs
-                        new_urls = set()
-                        for link in soup.find_all("a", href=True):
-                            href = link["href"]
-                            if href.startswith("#") or href.startswith("mailto:"):
-                                continue
-                            full_url = urljoin(url, href)
-                            normalized_url = self._normalize_url(full_url)
-                            if (
-                                normalized_url not in self.visited
-                                and normalized_url not in self.failed
-                                and normalized_url not in self.to_visit
-                                and normalized_url != url
-                                and self._is_valid_uci_url(normalized_url)
-                            ):
-                                new_urls.add(normalized_url)
-
-                        await broadcast_log(f"Found {len(new_urls)} new URLs on {url}")
-
-                        # Process new URLs and create relationships
-                        for new_url in new_urls:
-                            if new_url not in self.to_visit:
-                                self.to_visit.append(new_url)
-
-                                existing_doc = await self._document_exists(db, new_url)
-                                if existing_doc:
-                                    relationship = DocumentRelationship(
-                                        source_document_id=doc.id,
-                                        target_document_id=existing_doc.id,
-                                    )
-                                    db.add(relationship)
-                                else:
-                                    target_doc = Document(
-                                        url=new_url,
-                                        title=new_url,
-                                        content="",
-                                        discovered_at=datetime.now(timezone.utc),
-                                        is_crawled=False,
-                                        crawl_failed=False,
-                                    )
-                                    db.add(target_doc)
-                                    await db.flush()
-
-                                    relationship = DocumentRelationship(
-                                        source_document_id=doc.id,
-                                        target_document_id=target_doc.id,
-                                    )
-                                    db.add(relationship)
-
-                                state.urls_queued += 1
-
-                        await broadcast_log(
-                            f"Crawled: {url} | Queue: {len(self.to_visit)} | New URLs: {len(new_urls)}"
-                        )
-                        if new_urls:
-                            sample_urls = list(new_urls)[:3]
+                            end_time = datetime.now(timezone.utc)
+                            duration = (end_time - start_time).total_seconds()
                             await broadcast_log(
-                                f"Found URLs: {', '.join(sample_urls)}{'...' if len(new_urls) > 3 else ''}"
+                                f"Received response from {url} in {duration:.2f} seconds"
                             )
 
-                        # Update crawler state
-                        self.visited.add(url)
-                        state.current_url = url
-                        state.urls_visited += 1
-                        state.updated_at = datetime.now(timezone.utc)
+                            soup = BeautifulSoup(response.text, "html.parser")
+                            title = soup.title.string if soup.title else url
+                            content = soup.get_text()
 
-                        await self._update_statistics(True, db)
-                        await db.commit()
-                        await broadcast_log(f"Committed changes for {url}")
+                            await broadcast_log(
+                                f"Parsed content from {url}, title: {title[:30]}{'...' if len(title) > 30 else ''}"
+                            )
+
+                            # Use a new session for database operations
+                            async with get_db() as db:
+                                # Update or create document
+                                existing_doc = await self._document_exists(db, url)
+                                if existing_doc:
+                                    existing_doc.title = title
+                                    existing_doc.content = content
+                                    existing_doc.last_crawled_at = datetime.now(
+                                        timezone.utc
+                                    )
+                                    existing_doc.is_crawled = True
+                                    existing_doc.crawl_failed = False
+                                    existing_doc.error_message = None
+                                    doc = existing_doc
+                                else:
+                                    doc = Document(
+                                        url=url,
+                                        title=title,
+                                        content=content,
+                                        last_crawled_at=datetime.now(timezone.utc),
+                                        is_crawled=True,
+                                        crawl_failed=False,
+                                        error_message=None,
+                                    )
+                                    db.add(doc)
+
+                                await db.flush()
+                                await broadcast_log(
+                                    f"Added document to database, ID: {doc.id}"
+                                )
+
+                                # Extract and process new URLs
+                                new_urls = set()
+                                for link in soup.find_all("a", href=True):
+                                    href = link["href"]
+                                    if href.startswith("#") or href.startswith(
+                                        "mailto:"
+                                    ):
+                                        continue
+                                    full_url = urljoin(url, href)
+                                    normalized_url = self._normalize_url(full_url)
+                                    if (
+                                        normalized_url not in self.visited
+                                        and normalized_url not in self.failed
+                                        and normalized_url not in self.to_visit
+                                        and normalized_url != url
+                                        and self._is_valid_uci_url(normalized_url)
+                                    ):
+                                        new_urls.add(normalized_url)
+
+                                await broadcast_log(
+                                    f"Found {len(new_urls)} new URLs on {url}"
+                                )
+
+                                # Process new URLs and create relationships
+                                for new_url in new_urls:
+                                    if new_url not in self.to_visit:
+                                        self.to_visit.append(new_url)
+
+                                        existing_doc = await self._document_exists(
+                                            db, new_url
+                                        )
+                                        if existing_doc:
+                                            relationship = DocumentRelationship(
+                                                source_document_id=doc.id,
+                                                target_document_id=existing_doc.id,
+                                            )
+                                            db.add(relationship)
+                                        else:
+                                            target_doc = Document(
+                                                url=new_url,
+                                                title=new_url,
+                                                content="",
+                                                discovered_at=datetime.now(
+                                                    timezone.utc
+                                                ),
+                                                is_crawled=False,
+                                                crawl_failed=False,
+                                            )
+                                            db.add(target_doc)
+                                            await db.flush()
+
+                                            relationship = DocumentRelationship(
+                                                source_document_id=doc.id,
+                                                target_document_id=target_doc.id,
+                                            )
+                                            db.add(relationship)
+
+                                        state.urls_queued += 1
+
+                                await broadcast_log(
+                                    f"Crawled: {url} | Queue: {len(self.to_visit)} | New URLs: {len(new_urls)}"
+                                )
+                                if new_urls:
+                                    sample_urls = list(new_urls)[:3]
+                                    await broadcast_log(
+                                        f"Found URLs: {', '.join(sample_urls)}{'...' if len(new_urls) > 3 else ''}"
+                                    )
+
+                                # Update crawler state
+                                self.visited.add(url)
+                                state.current_url = url
+                                state.urls_visited += 1
+                                state.updated_at = datetime.now(timezone.utc)
+
+                                await self._update_statistics(True, db)
+                                await db.commit()
+                                await broadcast_log(f"Committed changes for {url}")
 
                     except Exception as e:
                         self.failed.add(url)
+                        error_msg = str(e)
+
+                        if "greenlet_spawn has not been called" in error_msg:
+                            logger.error(f"Async context error for {url}: {error_msg}")
+                            error_msg = "Database async context error. Try adjusting concurrency settings."
 
                         try:
-                            await db.rollback()
+                            # Use a new session for error logging
+                            async with get_db() as db:
+                                # Update failed state
+                                state = await db.execute(
+                                    select(CrawlerState)
+                                    .order_by(CrawlerState.id.desc())
+                                    .limit(1)
+                                )
+                                state = state.scalar_one_or_none()
 
-                            # Update failed state
-                            state = await db.execute(
-                                select(CrawlerState)
-                                .order_by(CrawlerState.id.desc())
-                                .limit(1)
-                            )
-                            state = state.scalar_one_or_none()
+                                if state:
+                                    state.urls_failed += 1
+                                    state.updated_at = datetime.now(timezone.utc)
+                                    await db.commit()
 
-                            if state:
-                                state.urls_failed += 1
-                                state.updated_at = datetime.now(timezone.utc)
-                                await db.commit()
-
-                            # Update document error state
-                            doc = await self._document_exists(db, url)
-                            if doc:
-                                doc.crawl_failed = True
-                                doc.error_message = str(e)
-                                doc.last_crawled_at = datetime.now(timezone.utc)
-                                await db.commit()
+                                # Update document error state
+                                doc = await self._document_exists(db, url)
+                                if doc:
+                                    doc.crawl_failed = True
+                                    doc.error_message = error_msg
+                                    doc.last_crawled_at = datetime.now(timezone.utc)
+                                    await db.commit()
 
                         except Exception as recovery_error:
                             await broadcast_log(
                                 f"Failed to recover from error: {str(recovery_error)}"
                             )
 
-                        await broadcast_log(f"Failed to crawl {url}: {str(e)}")
+                        await broadcast_log(f"Failed to crawl {url}: {error_msg}")
 
                         try:
-                            await self._update_statistics(False, db)
-                            await db.commit()
+                            async with get_db() as db:
+                                await self._update_statistics(False, db)
+                                await db.commit()
                         except Exception:
                             await broadcast_log(
                                 "Failed to update statistics after error"
@@ -453,12 +474,23 @@ class CrawlerService:
                 await self._update_statistics(success, db)
                 return
 
-        if success:
-            self.stats.urls_crawled += 1
-        else:
-            self.stats.urls_failed += 1
+        try:
+            if success:
+                self.stats.urls_crawled += 1
+            else:
+                self.stats.urls_failed += 1
 
-        if (self.stats.urls_crawled + self.stats.urls_failed) % 10 == 0:
+            state = await db.execute(
+                select(CrawlerState).order_by(CrawlerState.id.desc()).limit(1)
+            )
+            state = state.scalar_one_or_none()
+
+            if state:
+                state.urls_visited = len(self.visited)
+                state.urls_failed = len(self.failed)
+                state.urls_queued = len(self.to_visit)
+                state.updated_at = datetime.now(timezone.utc)
+
             domains_query = """
             SELECT COUNT(DISTINCT SUBSTR(url, INSTR(url, '://') + 3, 
                    CASE WHEN INSTR(SUBSTR(url, INSTR(url, '://') + 3), '/') = 0 
@@ -469,8 +501,10 @@ class CrawlerService:
             result = await db.execute(text(domains_query))
             self.stats.unique_domains = result.scalar() or 0
 
-        if (self.stats.urls_crawled + self.stats.urls_failed) % 5 == 0:
             await db.commit()
+
+        except Exception as e:
+            logger.error(f"Error updating statistics: {str(e)}")
 
     async def _reconstruct_queue(self, db: AsyncSession) -> int:
         """Reconstruct the queue from database relationships"""

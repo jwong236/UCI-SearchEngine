@@ -45,6 +45,8 @@ from ..config.globals import (
 from ..config.settings import settings
 from sqlalchemy import select, delete, update
 from fastapi.responses import FileResponse
+import traceback
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -63,18 +65,23 @@ async def get_databases():
     return {"current": get_current_db(), "available": get_available_databases()}
 
 
+class DbSwitchRequest(BaseModel):
+    db_name: str
+    secret_key: str
+
+
 @router.post("/databases/switch")
-async def switch_database(db_name: str, secret_key: str):
+async def switch_database(request: DbSwitchRequest):
     """Switch to a different database"""
-    if secret_key != settings.SECRET_KEY:
+    if request.secret_key != settings.SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid secret key")
 
-    if db_name not in get_available_databases():
+    if request.db_name not in get_available_databases():
         raise HTTPException(status_code=404, detail="Database not found")
 
-    set_current_db(db_name)
-    setup_connections(db_name)
-    return {"message": f"Switched to database: {db_name}"}
+    set_current_db(request.db_name)
+    await setup_connections(request.db_name)
+    return {"message": f"Switched to database: {request.db_name}"}
 
 
 @router.delete("/databases/{db_name}")
@@ -236,18 +243,37 @@ async def stop_crawler(x_secret_key: str = Depends(verify_secret_key)):
 async def get_crawler_status():
     """Get crawler status"""
     async with get_db() as db:
-        state = (
-            await db.execute(
-                select(CrawlerState).order_by(CrawlerState.id.desc()).limit(1)
+        state = await db.execute(
+            select(CrawlerState).order_by(CrawlerState.id.desc()).limit(1)
+        )
+        state = state.scalar_one_or_none()
+
+        if not state:
+            crawled_count = await db.execute(
+                select(Document).where(Document.is_crawled == True)
             )
-        ).scalar_one_or_none()
+            crawled_count = crawled_count.scalars().count()
+
+            failed_count = await db.execute(
+                select(Document).where(Document.crawl_failed == True)
+            )
+            failed_count = failed_count.scalars().count()
+
+            return {
+                "status": "running" if is_crawler_running() else "stopped",
+                "statistics": {
+                    "urls_crawled": crawled_count,
+                    "urls_failed": failed_count,
+                    "urls_in_queue": 0,
+                },
+            }
 
         return {
             "status": "running" if is_crawler_running() else "stopped",
             "statistics": {
-                "urls_crawled": state.urls_visited if state else 0,
-                "urls_failed": state.urls_failed if state else 0,
-                "urls_in_queue": state.urls_queued if state else 0,
+                "urls_crawled": state.urls_visited,
+                "urls_failed": state.urls_failed,
+                "urls_in_queue": state.urls_queued,
             },
         }
 
@@ -405,8 +431,10 @@ async def get_failed_urls():
                 ]
             }
     except Exception as e:
-        logger.error(f"Error fetching failed URLs: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch failed URLs")
+        logger.error(f"Error fetching failed URLs: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch failed URLs: {str(e)}"
+        )
 
 
 @router.get("/databases/{db_name}/download")

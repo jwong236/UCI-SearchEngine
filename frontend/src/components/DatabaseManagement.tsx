@@ -14,7 +14,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  Box
 } from '@mui/material';
 import { Upload as UploadIcon, Delete as DeleteIcon, Download as DownloadIcon } from '@mui/icons-material';
 import axios from 'axios';
@@ -89,12 +90,16 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
       await axios.post(`${API_BASE_URL}/databases/switch`, {
         db_name: selectedDb,
         secret_key: secretKey
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
       setMessage({ type: 'success', text: 'Database switched successfully' });
       fetchDatabases();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to switch database:', error);
-      setMessage({ type: 'error', text: 'Failed to switch database' });
+      setMessage({ type: 'error', text: `Failed to switch database: ${error.response?.data?.detail || error.message}` });
     }
   };
 
@@ -251,13 +256,22 @@ const DatabaseManagement: React.FC<DatabaseManagementProps> = ({ secretKey }) =>
         Database Management
       </Typography>
       
+      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+          Current database:
+        </Typography>
+        <Typography variant="body1" fontWeight="medium">
+          {databases.current || 'None'}
+        </Typography>
+      </Box>
+      
       <Stack spacing={2}>
         <FormControl fullWidth>
-          <InputLabel id="database-select-label">Current Database</InputLabel>
+          <InputLabel id="database-select-label">Select Database</InputLabel>
           <Select
             labelId="database-select-label"
             value={selectedDb}
-            label="Current Database"
+            label="Select Database"
             onChange={(e) => setSelectedDb(e.target.value)}
           >
             {databases.available.map((db) => (
